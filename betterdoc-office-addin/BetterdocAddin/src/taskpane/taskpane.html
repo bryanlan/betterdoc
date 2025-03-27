@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Betterdoc Task Pane</title>
+    <script type="text/javascript" src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <h1>Betterdoc</h1>
+
+    <div id="main-container">
+      <!-- Navigation: Up/Down buttons -->
+      <div id="navigation">
+        <button id="btnUp">↑</button>
+        <button id="btnDown">↓</button>
+        <label style="font-size:12px; margin-left:10px;">
+          <input type="checkbox" id="checkboxReimagine" /> Reimagine
+        </label>
+      </div>
+
+      <!-- Current Paragraph Header -->
+      <div id="currentParagraphHeader">
+        <span id="paragraphHeader">Paragraph 1</span>
+      </div>
+
+      <!-- Text Editing Section -->
+      <div id="textEditor">
+        <label>Original Text:</label><br/>
+        <textarea id="originalText" rows="5" style="width:100%;" readonly></textarea><br/><br/>
+
+        <label>Modified/LLM Text:</label><br/>
+        <textarea id="modifiedText" rows="5" style="width:100%;"></textarea>
+      </div>
+
+      <hr>
+
+      <!-- Selected Paragraphs Section -->
+      <div id="selectedParagraphsSection">
+        <!-- Fixed label with small font -->
+        <div id="selectedParagraphsLabel" style="font-size:12px; margin-bottom:5px;">
+          Paragraphs to be reimagined:
+        </div>
+        <!-- Clickable list container -->
+        <div id="selectedParagraphsList" style="cursor:pointer; border:1px solid #ccc; padding:5px; max-height:150px; overflow-y:auto;">
+          <!-- List items will be injected dynamically.
+               Each item should be clickable to jump to that paragraph. -->
+        </div>
+        <!-- Bulk selection buttons -->
+        <div id="bulkSelection" style="margin-top:10px;">
+          <button id="btnSelectAll">Select All</button>
+          <button id="btnUnselectAll">Unselect All</button>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div id="actionButtons" style="margin-top:10px;">
+        <button id="btnReimagine">Reimagine Now</button>
+        <button id="btnApply">Apply</button>
+        <button id="btnApplyAll">Apply All</button>
+      </div>
+
+      <!-- Replace the Toggle Prompt Editor Button and Prompt Editor Section with: -->
+      <div style="margin-top:10px;">
+        <label for="promptSelect"><b>Prompt Selection:</b></label>
+        <select id="promptSelect" style="width:100%; margin-top:5px; padding:5px;">
+          <option value="professional">Make More Professional</option>
+          <option value="concise">Reduce Word Count</option>
+          <option value="custom">Custom Prompt...</option>
+        </select>
+      </div>
+
+      <!-- Custom Prompt Editor Section -->
+      <div id="custom-prompt-section" style="display: none; margin-top:10px;">
+        <textarea id="customPromptInput" rows="3" style="width:100%;">Replace this with your own prompt</textarea>
+      </div>
+
+      <!-- Add Model Selection dropdown -->
+      <div style="margin-top:10px;">
+        <label for="modelSelect"><b>Model Selection:</b></label>
+        <select id="modelSelect" style="width:100%; margin-top:5px; padding:5px;">
+          <!-- Options will be populated from modelnames.json -->
+        </select>
+      </div>
+
+      <!-- Add this after the reimagine checkbox -->
+      <div style="margin-top:10px; display:flex; justify-content: space-between; align-items: center;">
+        <div>
+          <input type="checkbox" id="reimagineCheckbox" />
+          <label for="reimagineCheckbox">Reimagine</label>
+        </div>
+        <button id="refreshButton" class="ms-Button">
+          <span class="ms-Button-label">Refresh</span>
+        </button>
+      </div>
+
+      <!-- Add paragraph label -->
+      <div id="paragraphLabel" style="margin-top:10px; font-weight:bold;">No paragraph selected</div>
+    </div>
+
+    <!-- Debug Log Window -->
+    <div id="debugLog" style="background:#f8f8f8; color:#333; font-size:12px; padding:10px; border:1px solid #ccc; margin-top:20px; height:200px; overflow-y:auto;">
+      <strong>Debug Log:</strong>
+    </div>
+
+    <script src="taskpane.js"></script>
+    <script>
+      // Define available models globally
+      window.availableModels = [
+        "qwq:latest",
+        "gemma3:12b",
+        "gemma3:27b", 
+        "deepseek-r1:14b",
+        "deepseek-r1:32b"
+      ];
+    </script>
+  </body>
+</html>

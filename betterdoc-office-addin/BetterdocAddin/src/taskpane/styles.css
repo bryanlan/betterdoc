@@ -1,0 +1,97 @@
+/* Global Body Styles */
+body {
+  font-family: Arial, sans-serif;
+  margin: 10px;
+  padding: 0;
+}
+
+/* Main Container */
+#main-container {
+  margin-top: 10px;
+}
+
+/* Navigation Area: Up/Down Buttons & Goto Dropdown */
+#navigation {
+  margin-bottom: 10px;
+}
+
+/* Make arrow buttons smaller */
+#navigation button {
+  margin-right: 5px;
+  font-size: 14px;
+  width: 30px;  /* Reduced from 50px */
+  height: 25px; /* Reduced from 30px */
+}
+
+#gotoParagraphDropdown {
+  font-size: 16px;
+  padding: 4px;
+  margin-left: 5px;
+}
+
+/* Current Paragraph Header & Checkbox */
+#currentParagraphHeader {
+  margin-bottom: 10px;
+  font-size: 18px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Bulk Selection Buttons */
+#bulkSelection button {
+  font-size: 14px;
+  margin-right: 5px;
+  padding: 5px 10px;
+}
+
+/* Selected Paragraphs List (displayed above debug log) */
+#selectedParagraphsList {
+  background: #f0f0f0;
+  padding: 8px;
+  margin-bottom: 10px;
+  border: 1px solid #ccc;
+  max-height: 150px;
+  overflow-y: auto;
+  font-size: 12px; /* Smaller font for the list */
+  margin: 5px 0;
+}
+
+#selectedParagraphsList ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+#selectedParagraphsList li {
+  margin: 2px 0;
+  line-height: 1.2;
+}
+
+/* Make select/unselect buttons match Reimagine button */
+#btnSelectAll, #btnUnselectAll {
+  width: auto;
+  padding: 5px 10px;
+  margin: 5px;
+  height: 30px;
+}
+
+/* General Button Styles */
+button {
+  cursor: pointer;
+  margin-top: 5px;
+}
+
+/* Textarea Styles */
+#originalText, #modifiedText {
+  font-family: "Segoe UI", sans-serif;
+  width: 100%;
+  min-height: 150px; /* Increased from default */
+  margin-bottom: 10px;
+}
+
+/* Horizontal Rule Spacing */
+hr {
+  margin-top: 15px;
+  margin-bottom: 15px;
+}

@@ -1,0 +1,13 @@
+/node_modules/
+# Binaries and shared libs
+*.exe
+*.dll
+*.def
+
+# Certificates and security files
+*.crt
+
+# Any other temp or output files
+6
+10
+64k

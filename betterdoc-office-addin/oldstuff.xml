@@ -1,0 +1,205 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<OfficeApp 
+  xmlns="http://schemas.microsoft.com/office/appforoffice/1.1" 
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0" 
+  xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides"
+  xsi:type="TaskPaneApp"
+>
+  <!-- Keep your existing Yeoman ID and version -->
+  <Id>6fd81768-aa8e-4562-9c03-c9a2c21bccff</Id>
+  <Version>1.0.0.0</Version>
+  <ProviderName>Contoso</ProviderName>
+  <DefaultLocale>en-US</DefaultLocale>
+
+  <DisplayName DefaultValue="BetterdocAddin"/>
+  <Description DefaultValue="A template to get started."/>
+  <IconUrl DefaultValue="https://localhost:3000/assets/icon-32.png"/>
+  <HighResolutionIconUrl DefaultValue="https://localhost:3000/assets/icon-64.png"/>
+  <SupportUrl DefaultValue="https://www.contoso.com/help"/>
+
+  <AppDomains>
+    <AppDomain>https://www.contoso.com</AppDomain>
+  </AppDomains>
+
+  <Hosts>
+    <Host Name="Document"/>
+  </Hosts>
+
+  <DefaultSettings>
+    <SourceLocation DefaultValue="https://localhost:3000/taskpane.html"/>
+  </DefaultSettings>
+
+  <Permissions>ReadWriteDocument</Permissions>
+
+  <!-- VersionOverrides from Yeoman, extended to add a new custom tab -->
+  <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides"
+                    xsi:type="VersionOverridesV1_0">
+    <Hosts>
+      <Host xsi:type="Document">
+        <DesktopFormFactor>
+          <GetStarted>
+            <Title resid="GetStarted.Title"/>
+            <Description resid="GetStarted.Description"/>
+            <LearnMoreUrl resid="GetStarted.LearnMoreUrl"/>
+          </GetStarted>
+
+          <!-- FunctionFile that Yeoman sets -->
+          <FunctionFile resid="Commands.Url"/>
+
+          <ExtensionPoint xsi:type="PrimaryCommandSurface">
+            <!-- The original Yeoman sample group on the HOME tab -->
+            <OfficeTab id="TabHome">
+              <Group id="CommandsGroup">
+                <Label resid="CommandsGroup.Label"/>
+                <Icon>
+                  <bt:Image size="16" resid="Icon.16x16"/>
+                  <bt:Image size="32" resid="Icon.32x32"/>
+                  <bt:Image size="80" resid="Icon.80x80"/>
+                </Icon>
+                <Control xsi:type="Button" id="TaskpaneButton">
+                  <Label resid="TaskpaneButton.Label"/>
+                  <Supertip>
+                    <Title resid="TaskpaneButton.Label"/>
+                    <Description resid="TaskpaneButton.Tooltip"/>
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16x16"/>
+                    <bt:Image size="32" resid="Icon.32x32"/>
+                    <bt:Image size="80" resid="Icon.80x80"/>
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <TaskpaneId>ButtonId1</TaskpaneId>
+                    <SourceLocation resid="Taskpane.Url"/>
+                  </Action>
+                </Control>
+              </Group>
+            </OfficeTab>
+
+            <!-- NEW: A separate custom tab for Betterdoc -->
+            <CustomTab id="TabBetterdoc">
+              <Group id="GroupBetterdoc">
+                <Label resid="GroupBetterdoc.Label"/>
+                <Icon>
+                  <bt:Image size="16" resid="Icon.16x16"/>
+                  <bt:Image size="32" resid="Icon.32x32"/>
+                  <bt:Image size="80" resid="Icon.80x80"/>
+                </Icon>
+
+                <!-- Up Button -->
+                <Control xsi:type="Button" id="ButtonUp">
+                  <Label resid="ButtonUp.Label"/>
+                  <Supertip>
+                    <Title resid="ButtonUp.Label"/>
+                    <Description resid="ButtonUp.Tooltip"/>
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16x16"/>
+                    <bt:Image size="32" resid="Icon.32x32"/>
+                    <bt:Image size="80" resid="Icon.80x80"/>
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <TaskpaneId>ButtonIdUp</TaskpaneId>
+                    <SourceLocation resid="Taskpane.Url"/>
+                  </Action>
+                </Control>
+
+                <!-- Down Button -->
+                <Control xsi:type="Button" id="ButtonDown">
+                  <Label resid="ButtonDown.Label"/>
+                  <Supertip>
+                    <Title resid="ButtonDown.Label"/>
+                    <Description resid="ButtonDown.Tooltip"/>
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16x16"/>
+                    <bt:Image size="32" resid="Icon.32x32"/>
+                    <bt:Image size="80" resid="Icon.80x80"/>
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <TaskpaneId>ButtonIdDown</TaskpaneId>
+                    <SourceLocation resid="Taskpane.Url"/>
+                  </Action>
+                </Control>
+
+                <!-- Reimagine All Button -->
+                <Control xsi:type="Button" id="ButtonReimagineAll">
+                  <Label resid="ButtonReimagineAll.Label"/>
+                  <Supertip>
+                    <Title resid="ButtonReimagineAll.Label"/>
+                    <Description resid="ButtonReimagineAll.Tooltip"/>
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16x16"/>
+                    <bt:Image size="32" resid="Icon.32x32"/>
+                    <bt:Image size="80" resid="Icon.80x80"/>
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <TaskpaneId>ButtonIdReimagineAll</TaskpaneId>
+                    <SourceLocation resid="Taskpane.Url"/>
+                  </Action>
+                </Control>
+
+                <!-- Prompt Edit Button -->
+                <Control xsi:type="Button" id="ButtonPromptEdit">
+                  <Label resid="ButtonPromptEdit.Label"/>
+                  <Supertip>
+                    <Title resid="ButtonPromptEdit.Label"/>
+                    <Description resid="ButtonPromptEdit.Tooltip"/>
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16x16"/>
+                    <bt:Image size="32" resid="Icon.32x32"/>
+                    <bt:Image size="80" resid="Icon.80x80"/>
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <TaskpaneId>ButtonIdPromptEdit</TaskpaneId>
+                    <SourceLocation resid="Taskpane.Url"/>
+                  </Action>
+                </Control>
+              </Group>
+            </CustomTab>
+          </ExtensionPoint>
+        </DesktopFormFactor>
+      </Host>
+    </Hosts>
+
+    <!-- Use the same existing resources from Yeoman, but add new strings. -->
+    <Resources>
+      <bt:Images>
+        <bt:Image id="Icon.16x16" DefaultValue="https://localhost:3000/assets/icon-16.png"/>
+        <bt:Image id="Icon.32x32" DefaultValue="https://localhost:3000/assets/icon-32.png"/>
+        <bt:Image id="Icon.80x80" DefaultValue="https://localhost:3000/assets/icon-80.png"/>
+      </bt:Images>
+      <bt:Urls>
+        <bt:Url id="GetStarted.LearnMoreUrl" DefaultValue="https://go.microsoft.com/fwlink/?LinkId=276812"/>
+        <bt:Url id="Commands.Url" DefaultValue="https://localhost:3000/commands.html"/>
+        <bt:Url id="Taskpane.Url" DefaultValue="https://localhost:3000/taskpane.html"/>
+      </bt:Urls>
+      <bt:ShortStrings>
+        <!-- Existing Yeoman strings -->
+        <bt:String id="GetStarted.Title" DefaultValue="Get started with your sample add-in!"/>
+        <bt:String id="CommandsGroup.Label" DefaultValue="Commands Group"/>
+        <bt:String id="TaskpaneButton.Label" DefaultValue="Show Task Pane"/>
+
+        <!-- NEW group/button labels for Betterdoc tab -->
+        <bt:String id="GroupBetterdoc.Label" DefaultValue="Betterdoc"/>
+        <bt:String id="ButtonUp.Label" DefaultValue="Up"/>
+        <bt:String id="ButtonDown.Label" DefaultValue="Down"/>
+        <bt:String id="ButtonReimagineAll.Label" DefaultValue="Reimagine All"/>
+        <bt:String id="ButtonPromptEdit.Label" DefaultValue="Prompt Edit"/>
+      </bt:ShortStrings>
+      <bt:LongStrings>
+        <!-- Existing Yeoman strings -->
+        <bt:String id="GetStarted.Description" DefaultValue="Your sample add-in loaded successfully. Go to the HOME tab and click the 'Show Task Pane' button to get started."/>
+        <bt:String id="TaskpaneButton.Tooltip" DefaultValue="Click to Show a Taskpane"/>
+
+        <!-- NEW tooltips -->
+        <bt:String id="ButtonUp.Tooltip" DefaultValue="Select the previous paragraph"/>
+        <bt:String id="ButtonDown.Tooltip" DefaultValue="Select the next paragraph"/>
+        <bt:String id="ButtonReimagineAll.Tooltip" DefaultValue="Rewrite all paragraphs at once."/>
+        <bt:String id="ButtonPromptEdit.Tooltip" DefaultValue="Toggle editing the rewrite prompt"/>
+      </bt:LongStrings>
+    </Resources>
+  </VersionOverrides>
+</OfficeApp>

@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<OfficeApp
+  xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
+  
+    xsi:type="TaskPaneApp">
+
+  <!-- IDENTIFICATION -->
+  <Id>baa31c8f-db4c-4431-b90d-9b3488e14776</Id>
+  <Version>1.0.0.0</Version>
+  <ProviderName>Bryan Langley</ProviderName>
+  <DefaultLocale>en-US</DefaultLocale>
+  <DisplayName DefaultValue="Betterdoc Add-in"/>
+  <Description DefaultValue="An example add-in that reimagines Word document text via a local LLM."/>
+  <IconUrl DefaultValue="https://localhost:3000/assets/icon-32.png"/>
+  <SupportUrl DefaultValue="https://localhost:3000/support"/>
+  <AppDomains>
+    <AppDomain>https://localhost:3000</AppDomain> <!-- Must include protocol/port -->
+  </AppDomains>
+  <!-- SUPPORTED PRODUCTS -->
+  <Hosts>
+    <Host Name="Document"/>
+  </Hosts>
+
+  <!-- DEFAULT SETTINGS -->
+  <DefaultSettings>
+    <SourceLocation DefaultValue="https://localhost:3000/taskpane.html"/>
+    <RequestedWidth>350</RequestedWidth>
+  </DefaultSettings>
+  <!-- Add this section below DefaultSettings -->
+  <Permissions>ReadWriteDocument</Permissions>
+
+  <!-- VERSION OVERRIDES -->
+  <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides/1.1" Version="1.1">
+    <Hosts>
+      <Host Name="Document">
+        <Runtimes>
+          <Runtime resid="Taskpane.Url" lifetime="long" />
+        </Runtimes>
+
+        <DesktopFormFactor>
+          <!-- Custom Tab -->
+          <ExtensionPoint xsi:type="PrimaryCommandSurface">
+            <CustomTab id="TabBetterdoc">
+              <Group id="GroupBetterdoc">
+                <Label resid="GroupBetterdocLabel"/>
+                <Icon>
+                  <bt:Image size="16" resid="Icon.16"/>
+                  <bt:Image size="32" resid="Icon.32"/>
+                  <bt:Image size="80" resid="Icon.80"/>
+                </Icon>
+
+                <!-- Up Button -->
+                <Control xsi:type="Button" id="ButtonUp">
+                  <Label resid="ButtonUpLabel"/>
+                  <Supertip>
+                    <Title resid="ButtonUpLabel"/>
+                    <Description resid="ButtonUpDescription"/>
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16"/>
+                    <bt:Image size="32" resid="Icon.32"/>
+                    <bt:Image size="80" resid="Icon.80"/>
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <SourceLocation resid="Taskpane.Url"/>
+                  </Action>
+                </Control>
+
+                <!-- Down Button -->
+                <Control xsi:type="Button" id="ButtonDown">
+                  <Label resid="ButtonDownLabel"/>
+                  <Supertip>
+                    <Title resid="ButtonDownLabel"/>
+                    <Description resid="ButtonDownDescription"/>
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16"/>
+                    <bt:Image size="32" resid="Icon.32"/>
+                    <bt:Image size="80" resid="Icon.80"/>
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <SourceLocation resid="Taskpane.Url"/>
+                  </Action>
+                </Control>
+
+                <!-- Reimagine All Button -->
+                <Control xsi:type="Button" id="ButtonReimagineAll">
+                  <Label resid="ButtonReimagineAllLabel"/>
+                  <Supertip>
+                    <Title resid="ButtonReimagineAllLabel"/>
+                    <Description resid="ButtonReimagineAllDescription"/>
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16"/>
+                    <bt:Image size="32" resid="Icon.32"/>
+                    <bt:Image size="80" resid="Icon.80"/>
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <SourceLocation resid="Taskpane.Url"/>
+                  </Action>
+                </Control>
+
+                <!-- Prompt Edit Button -->
+                <Control xsi:type="Button" id="ButtonPromptEdit">
+                  <Label resid="ButtonPromptEditLabel"/>
+                  <Supertip>
+                    <Title resid="ButtonPromptEditLabel"/>
+                    <Description resid="ButtonPromptEditDescription"/>
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16"/>
+                    <bt:Image size="32" resid="Icon.32"/>
+                    <bt:Image size="80" resid="Icon.80"/>
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <SourceLocation resid="Taskpane.Url"/>
+                  </Action>
+                </Control>
+
+              </Group>
+            </CustomTab>
+          </ExtensionPoint>
+        </DesktopFormFactor>
+      </Host>
+    </Hosts>
+
+    <!-- Resources -->
+    <Resources>
+      <bt:Images>
+        <bt:Image id="Icon.16" DefaultValue="https://localhost:3000/assets/icon-16.png"/>
+        <bt:Image id="Icon.32" DefaultValue="https://localhost:3000/assets/icon-32.png"/>
+        <bt:Image id="Icon.80" DefaultValue="https://localhost:3000/assets/icon-80.png"/>
+      </bt:Images>
+      <bt:Urls>
+        <bt:Url id="Taskpane.Url" DefaultValue="https://localhost:3000/taskpane.html"/>
+      </bt:Urls>
+      <bt:ShortStrings>
+        <bt:String id="GroupBetterdocLabel" DefaultValue="Betterdoc"/>
+        <bt:String id="ButtonUpLabel" DefaultValue="Up"/>
+        <bt:String id="ButtonDownLabel" DefaultValue="Down"/>
+        <bt:String id="ButtonReimagineAllLabel" DefaultValue="Reimagine All"/>
+        <bt:String id="ButtonPromptEditLabel" DefaultValue="Prompt Edit"/>
+      </bt:ShortStrings>
+      <bt:LongStrings>
+        <bt:String id="ButtonUpDescription" DefaultValue="Highlight the previous paragraph in the document."/>
+        <bt:String id="ButtonDownDescription" DefaultValue="Highlight the next paragraph in the document."/>
+        <bt:String id="ButtonReimagineAllDescription" DefaultValue="Use your LLM prompt to rewrite all paragraphs at once."/>
+        <bt:String id="ButtonPromptEditDescription" DefaultValue="Show or hide the editable prompt window."/>
+      </bt:LongStrings>
+    </Resources>
+  </VersionOverrides>
+</OfficeApp>

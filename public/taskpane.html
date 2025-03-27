@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Betterdoc Task Pane</title>
+    <script type="text/javascript" src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <h1>Betterdoc</h1>
+
+    <div id="main-container">
+      <div id="navigation">
+        <button id="btnUp">↑</button>
+        <button id="btnDown">↓</button>
+      </div>
+
+      <div>
+        <button id="togglePromptBtn">Toggle Prompt Editor</button>
+      </div>
+
+      <div id="prompt-section" style="display: none;">
+        <label for="promptInput"><b>Prompt:</b></label><br/>
+        <textarea id="promptInput" rows="3" style="width:100%;">
+Rewrite this and make it sound more professional while not leaving out any info.
+        </textarea>
+      </div>
+
+      <div>
+        <button id="btnReimagineAll">Reimagine All</button>
+      </div>
+
+      <hr>
+      <div>
+        <h3>Selected Paragraph</h3>
+        <label>Original Text:</label><br/>
+        <textarea id="originalText" rows="5" style="width:100%;" readonly></textarea><br/><br/>
+
+        <label>Modified/LLM Text:</label><br/>
+        <textarea id="modifiedText" rows="5" style="width:100%;"></textarea><br/>
+
+        <button id="btnReimagine">Reimagine</button>
+        <button id="btnApply">Apply</button>
+      </div>
+    </div>
+
+    <script src="taskpane.js"></script>
+  </body>
+</html> 
