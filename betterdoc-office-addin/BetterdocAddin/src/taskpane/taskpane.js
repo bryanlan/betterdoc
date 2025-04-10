@@ -1,21 +1,22 @@
 /* global Word, Office */
 
 // Global variables.
-let paragraphs = [];            // Array of paragraph text from the document.
-let currentParagraphIndex = 0;  // Track which paragraph is currently selected.
-let reimaginedAllText = null;   // In "Reimagine All" mode, store combined text here.
-let isPromptEditorVisible = false;
-
-// New globals for multi‐paragraph selection and LLM outputs.
-let selectedParagraphs = new Set();  // Set of paragraph indexes selected for reimagination.
-let paragraphLLMOutputs = {};          // Mapping: paragraph index -> modified text.
-
-// Add new global to store formatting information
-let paragraphFormatting = {};  // Map: paragraph index -> formatting info
-
-// Add to the global variables section
+let paragraphCache = [];         // Array of objects containing paragraph data
+let currentParagraphIndex = 0;   // Track which paragraph is currently selected.
+let selectedParagraphs = new Set(); // Set of paragraph indexes selected for reimagination.
+let paragraphFormatting = {};    // Map: paragraph index -> formatting info
 let availableModels = [];
-let selectedModel = ""; // Will store the currently selected model
+let selectedModel = "";          // Will store the currently selected model
+
+// Each paragraphCache entry has the structure:
+// {
+//   source: "",        // Original text from document
+//   reimagined: {      // LLM output if it exists (null if not reimagined)
+//     text: "",
+//     formattingMatches: []
+//   },
+//   reimagineState: false  // Boolean for checkbox state
+// }
 
 // Fired when the Office.js library is ready.
 Office.onReady((info) => {
@@ -41,7 +42,7 @@ Office.onReady((info) => {
 
     // Load paragraphs from the document.
     loadParagraphsFromDocument().then(() => {
-      if (paragraphs.length > 0) {
+      if (paragraphCache.length > 0) {
         currentParagraphIndex = 0;
         updateUIForSelectedParagraph();
       }
@@ -268,11 +269,11 @@ async function detectFormatting(context, paragraph, index) {
 }
 
 /**
- * Loads all paragraphs in the Word document into our 'paragraphs' array
+ * Loads all paragraphs in the Word document into our 'paragraphCache' array
  */
 async function loadParagraphsFromDocument() {
   logMessage("Loading paragraphs from document...");
-  paragraphs = [];
+  paragraphCache = [];
   
   await Word.run(async (context) => {
     const body = context.document.body;
@@ -281,71 +282,105 @@ async function loadParagraphsFromDocument() {
     await context.sync();
 
     for (let i = 0; i < paras.items.length; i++) {
-      paragraphs.push(paras.items[i].text);
+      paragraphCache.push({
+        source: paras.items[i].text,
+        reimagined: null,
+        reimagineState: false
+      });
     }
     
-    logMessage(`Loaded ${paragraphs.length} paragraphs from document`);
+    logMessage(`Loaded ${paragraphCache.length} paragraphs from document`);
   }).catch((error) => {
     logMessage("Error loading paragraphs: " + error);
   });
   
-  return paragraphs;
+  // Clear selected paragraphs since we're refreshing everything
+  selectedParagraphs.clear();
+  
+  return paragraphCache;
 }
 
 /**
- * Highlights the current paragraph in the document.
+ * Selects the current paragraph in the document.
  */
-async function highlightCurrentParagraph() {
-  if (paragraphs.length === 0 || currentParagraphIndex < 0 || currentParagraphIndex >= paragraphs.length) {
+async function selectCurrentParagraph(context) {
+  if (paragraphCache.length === 0 || currentParagraphIndex < 0 || currentParagraphIndex >= paragraphCache.length) {
+    logMessage("Selection skipped: Invalid index or empty cache.");
     return;
   }
-  
-  await Word.run(async (context) => {
-    try {
-      // Clear any existing highlights first
-      const body = context.document.body;
-      body.style.backgroundColor = "white";
-      await context.sync();
-      
-      // Get the text to search for - limit to first 255 characters to avoid "too long" error
-      const paragraphText = paragraphs[currentParagraphIndex];
-      const searchText = paragraphText.substring(0, Math.min(255, paragraphText.length));
-      
-      if (searchText.trim().length < 3) {
-        logMessage("Paragraph text too short to highlight");
-        return;
-      }
-      
-      logMessage(`Searching for paragraph text: ${searchText.length} chars`);
-      
-      // Search for the paragraph text
-      const searchResults = body.search(searchText);
-      searchResults.load("items");
-  await context.sync();
-      
-      if (searchResults.items.length > 0) {
-        // Highlight the first match
-        searchResults.items[0].style.backgroundColor = "#FFFF00";
+
+  const body = context.document.body;
+
+  try {
+    // --- Step 1: Get the text to search for ---
+    const paragraphText = paragraphCache[currentParagraphIndex].source;
+    // Use the first 100 characters for searching, as before
+    const searchText = paragraphText.substring(0, Math.min(100, paragraphText.length));
+
+    if (searchText.trim().length < 3) {
+      logMessage(`Selection skipped: Paragraph text too short ("${searchText.substring(0, 10)}...")`);
+      return;
+    }
+
+    logMessage(`Searching for text to select: "${searchText.substring(0, 30)}..." (${searchText.length} chars)`);
+
+    // --- Step 2: Search for the current paragraph's text ---
+    const searchOptions = { matchCase: false, matchWholeWord: false };
+    const searchResults = body.search(searchText, searchOptions);
+    // We only need the items themselves to select one
+    searchResults.load("items");
     await context.sync();
-        logMessage("Paragraph highlighted successfully");
-  } else {
-        logMessage("Could not find paragraph to highlight");
-      }
-    } catch (error) {
-      logMessage(`Error highlighting paragraph: ${error}`);
+
+    if (searchResults.items.length > 0) {
+      const firstMatch = searchResults.items[0];
+
+      // --- Step 3: Select the found text ---
+      firstMatch.select(); // The core change: select the range
+      await context.sync();
+      logMessage(`Text selected successfully: "${firstMatch.text.substring(0, 30)}..."`);
+
+    } else {
+      logMessage(`Could not find paragraph text in document to select: "${searchText.substring(0, 30)}..."`);
+    }
+  } catch (error) {
+    // Log the full error for better debugging
+    logMessage(`--- ERROR during text selection ---`);
+    logMessage(`Error message: ${error.message}`);
+    if (error instanceof OfficeExtension.Error) {
+      logMessage("OfficeExtension Error Debug Info: " + JSON.stringify(error.debugInfo));
+    }
+    console.error("Selection Error Details:", error);
+    logMessage(`--- End ERROR ---`);
   }
-  }).catch((error) => logMessage(`Error in highlightCurrentParagraph: ${error}`));
 }
 
 /**
  * Updates the UI with the current paragraph's text.
  */
-function updateUIWithParagraph() {
-  document.getElementById("paragraphHeader").textContent = `Paragraph ${currentParagraphIndex + 1}`;
-  document.getElementById("originalText").value = paragraphs[currentParagraphIndex];
-  document.getElementById("modifiedText").value = paragraphLLMOutputs[currentParagraphIndex]?.text || "No changes from original text";
-  document.getElementById("checkboxReimagine").checked = selectedParagraphs.has(currentParagraphIndex);
-  logMessage(`UI updated with paragraph ${currentParagraphIndex + 1}`);
+function updateUIForSelectedParagraph() {
+  if (paragraphCache.length === 0 || currentParagraphIndex < 0 || currentParagraphIndex >= paragraphCache.length) {
+    document.getElementById("originalText").value = "";
+    document.getElementById("modifiedText").value = "";
+    document.getElementById("paragraphLabel").textContent = "No paragraph selected";
+    document.getElementById("checkboxReimagine").checked = false;
+    return;
+  }
+  
+  // Update the paragraph number display
+  document.getElementById("paragraphLabel").textContent = 
+    `Paragraph ${currentParagraphIndex + 1} of ${paragraphCache.length}`;
+  
+  // Display the original text
+  document.getElementById("originalText").value = paragraphCache[currentParagraphIndex].source;
+  
+  // Display reimagined text if available, otherwise show empty box
+  const reimaginedText = paragraphCache[currentParagraphIndex].reimagined?.text;
+  document.getElementById("modifiedText").value = reimaginedText || "";
+  
+  // Update the reimagine checkbox
+  document.getElementById("checkboxReimagine").checked = paragraphCache[currentParagraphIndex].reimagineState;
+  
+  // Update highlights in the document - this is now handled by the calling functions
 }
 
 /**
@@ -375,12 +410,25 @@ function updateSelectedParagraphList() {
  * Jumps to the specified paragraph index.
  */
 function goToParagraph(index) {
-  currentParagraphIndex = index;
-  Word.run(async (context) => {
-    await highlightCurrentParagraph(context);
-    updateUIForSelectedParagraph();
-  }).catch((error) => console.error(error));
-  logMessage("Jumped to paragraph " + (index + 1));
+  if (index >= 0 && index < paragraphCache.length && index !== currentParagraphIndex) {
+      currentParagraphIndex = index;
+      Word.run(async (context) => {
+        await selectCurrentParagraph(context); // Use the new function
+        await context.sync(); // Ensure selection syncs
+        updateUIForSelectedParagraph();
+        logMessage("Jumped to paragraph " + (index + 1));
+      }).catch((error) => logMessage("Error in goToParagraph: " + error));
+  } else if (index === currentParagraphIndex) {
+      // If jumping to the same index, still ensure selection and UI update
+       Word.run(async (context) => {
+        await selectCurrentParagraph(context); 
+        await context.sync(); 
+        updateUIForSelectedParagraph();
+      }).catch((error) => logMessage("Error re-selecting current paragraph: " + error));
+  } else {
+       logMessage(`Invalid index for goToParagraph: ${index}`);
+       updateUIForSelectedParagraph(); // Still update UI if jump is invalid
+  }
 }
 
 /**
@@ -388,6 +436,8 @@ function goToParagraph(index) {
  */
 function onCheckboxChange() {
   const checkbox = document.getElementById("checkboxReimagine");
+  paragraphCache[currentParagraphIndex].reimagineState = checkbox.checked;
+  
   if (checkbox.checked) {
     selectedParagraphs.add(currentParagraphIndex);
   } else {
@@ -403,17 +453,22 @@ function onModifiedTextBlur() {
   const modifiedBox = document.getElementById("modifiedText");
   const originalBox = document.getElementById("originalText");
   
-  // Don't save if it's our placeholder text
-  if (modifiedBox.value === "No changes from original text") {
+  // Don't save if it's empty
+  if (!modifiedBox.value.trim()) {
+    paragraphCache[currentParagraphIndex].reimagined = null;
     return;
   }
   
-  // If the modified text is the same as original, show placeholder
+  // If the modified text is the same as original, clear reimagined
   if (modifiedBox.value.trim() === originalBox.value.trim()) {
-    modifiedBox.value = "No changes from original text";
-    delete paragraphLLMOutputs[currentParagraphIndex];
+    paragraphCache[currentParagraphIndex].reimagined = null;
+    modifiedBox.value = "";
   } else {
-  paragraphLLMOutputs[currentParagraphIndex] = modifiedBox.value;
+    // Save the modified text to our cache
+    paragraphCache[currentParagraphIndex].reimagined = {
+      text: modifiedBox.value,
+      formattingMatches: paragraphCache[currentParagraphIndex].reimagined?.formattingMatches || []
+    };
   }
   
   logMessage(`Saved modified text for paragraph ${currentParagraphIndex + 1}`);
@@ -425,16 +480,26 @@ function onModifiedTextBlur() {
 function onUp() {
   if (currentParagraphIndex > 0) {
     let newIndex = currentParagraphIndex - 1;
-    while (newIndex > 0 && shouldSkipParagraph(paragraphs[newIndex])) {
+    while (newIndex > 0 && shouldSkipParagraph(paragraphCache[newIndex].source)) {
       newIndex--;
     }
-    currentParagraphIndex = newIndex;
-    reimaginedAllText = null;
-    
-    Word.run(async (context) => {
-      await highlightCurrentParagraph(context);
-      updateUIForSelectedParagraph();
-    }).catch((error) => logMessage("Error in onUp: " + error));
+    if (newIndex === 0 && shouldSkipParagraph(paragraphCache[newIndex].source)) {
+       newIndex = currentParagraphIndex; // Avoid getting stuck on skippable first item
+    }
+     // Only update if the index actually changed to avoid unnecessary selection calls
+    if (newIndex !== currentParagraphIndex) {
+        currentParagraphIndex = newIndex;
+        Word.run(async (context) => {
+          await selectCurrentParagraph(context); // Use the new function
+          await context.sync(); // Ensure selection syncs
+          updateUIForSelectedParagraph(); 
+        }).catch((error) => logMessage("Error in onUp: " + error));
+    } else {
+         // If index didn't change (e.g., blocked by skippable first item), just update UI
+         updateUIForSelectedParagraph();
+    }
+  } else {
+      updateUIForSelectedParagraph(); // Update UI even if at the boundary
   }
 }
 
@@ -442,18 +507,29 @@ function onUp() {
  * Moves to the next paragraph (Down).
  */
 function onDown() {
-  if (currentParagraphIndex < paragraphs.length - 1) {
+  if (currentParagraphIndex < paragraphCache.length - 1) {
     let newIndex = currentParagraphIndex + 1;
-    while (newIndex < paragraphs.length - 1 && shouldSkipParagraph(paragraphs[newIndex])) {
+     // Skipping logic remains the same
+    while (newIndex < paragraphCache.length - 1 && shouldSkipParagraph(paragraphCache[newIndex].source)) {
       newIndex++;
     }
-    currentParagraphIndex = newIndex;
-    reimaginedAllText = null;
-    
-    Word.run(async (context) => {
-      await highlightCurrentParagraph(context);
-      updateUIForSelectedParagraph();
-    }).catch((error) => logMessage("Error in onDown: " + error));
+     if (newIndex === paragraphCache.length - 1 && shouldSkipParagraph(paragraphCache[newIndex].source)) {
+       newIndex = currentParagraphIndex; // Avoid getting stuck on skippable last item
+    }
+     // Only update if the index actually changed
+    if (newIndex !== currentParagraphIndex) {
+        currentParagraphIndex = newIndex;
+        Word.run(async (context) => {
+          await selectCurrentParagraph(context); // Use the new function
+          await context.sync(); // Ensure selection syncs
+          updateUIForSelectedParagraph();
+        }).catch((error) => logMessage("Error in onDown: " + error));
+    } else {
+         // If index didn't change, just update UI
+         updateUIForSelectedParagraph();
+    }
+  } else {
+     updateUIForSelectedParagraph(); // Update UI even if at the boundary
   }
 }
 
@@ -475,114 +551,116 @@ async function onReimagine() {
       paras.load("items");
       await context.sync();
       
-  for (let idx of selectedParagraphs) {
+      for (let idx of selectedParagraphs) {
         try {
-    const originalText = paragraphs[idx];
+          const originalText = paragraphCache[idx].source;
           logMessage(`Processing paragraph ${idx + 1}`);
           
           // First detect formatting
           await detectFormatting(context, paras.items[idx], idx);
           
-          // Get rewritten text from LLM
-          let newText = await callOllama(originalText, prompt);
-          
-          // Check word count
-          const originalWordCount = countWords(originalText);
-          const newWordCount = countWords(newText);
-          
-          // If new text is more than 10% longer, ask for a shorter version
-          if (newWordCount > originalWordCount * 1.1) {
-            logMessage(`Word count exceeded: Original=${originalWordCount}, New=${newWordCount}`);
-            
-            // Create a follow-up prompt asking for shorter text
-            const followUpPrompt = `${prompt}\n\nYou failed to do as instructed and exceeded the word count. Try again and reduce your word count. The original had ${originalWordCount} words, yours had ${newWordCount}.`;
-            
-            // Call LLM again with the follow-up prompt
-            newText = await callOllama(originalText, followUpPrompt);
-            
-            // Log the new word count
-            const revisedWordCount = countWords(newText);
-            logMessage(`Revised word count: ${revisedWordCount}`);
+          // Initialize reimagined structure if it doesn't exist
+          if (!paragraphCache[idx].reimagined) {
+            paragraphCache[idx].reimagined = {
+              text: "",
+              formattingMatches: []
+            };
           }
           
-          // Process each non-modal phrase to find its match in new text
-          const formattingMatches = [];
-          for (const phrase of paragraphFormatting[idx].formattedClauses) {
-            // Prepare clean versions for comparison (no punctuation, lowercase)
-            const cleanPhrase = phrase.text.toLowerCase().replace(/[.,;:!?()]/g, '').trim();
-            const cleanNewText = newText.toLowerCase().replace(/[.,;:!?()]/g, '').trim();
+          try {
+            // Get rewritten text from LLM with retry logic
+            let newText = await callOllama(originalText, prompt);
+            if (!newText || newText.trim().length === 0) {
+              throw new Error("Empty response from LLM");
+            }
             
-            // Check if the exact phrase exists as a whole word in the new text
-            const phraseRegex = new RegExp(`\\b${escapeRegExp(cleanPhrase)}\\b`, 'i');
+            // Check word count
+            const originalWordCount = countWords(originalText);
+            const newWordCount = countWords(newText);
             
-            if (phraseRegex.test(cleanNewText)) {
-              // Direct match found - no need to call LLM
-              logMessage(`Direct match found for phrase: "${phrase.text}"`);
+            // If new text is more than 10% longer, ask for a shorter version
+            if (newWordCount > originalWordCount * 1.1) {
+              logMessage(`Word count exceeded: Original=${originalWordCount}, New=${newWordCount}`);
               
-              // Find the actual case in the new text
-              const match = newText.match(new RegExp(`\\b[^.,;:!?()]*${escapeRegExp(cleanPhrase)}[^.,;:!?()]*\\b`, 'i'));
-              const exactMatch = match ? match[0].trim() : phrase.text;
+              // Create a follow-up prompt asking for shorter text
+              const followUpPrompt = `${prompt}\n\nYou failed to do as instructed and exceeded the word count. Try again and reduce your word count. The original had ${originalWordCount} words, yours had ${newWordCount}.`;
               
-              formattingMatches.push({
-                newText: exactMatch,
-                formatting: phrase.formatting
-              });
-            } else {
-              // No direct match, use LLM to find equivalent
-              const matchPrompt = createClauseMatchPrompt(originalText, newText, phrase.text);
-              logMessage("Finding match for formatted phrase via LLM");
-              
-              let matchingClause = await callOllama(phrase.text, matchPrompt);
-              
-              // Check if the matching clause is too long compared to original
-              const originalPhraseWordCount = countWords(phrase.text);
-              const matchingClauseWordCount = countWords(matchingClause);
-              
-              // If the matching clause is more than 30% longer than the original phrase
-              if (matchingClauseWordCount > originalPhraseWordCount * 1.3 && matchingClauseWordCount > originalPhraseWordCount + 1) {
-                logMessage(`Matching clause too verbose: Original=${originalPhraseWordCount} words, Match=${matchingClauseWordCount} words`);
-                
-                // Create a follow-up prompt asking for a more concise match
-                const followUpPrompt = `${matchPrompt}\n\nYour matching text was too long. The original formatted text had ${originalPhraseWordCount} words, but your match had ${matchingClauseWordCount} words.\n\nPlease find a more concise match with approximately ${originalPhraseWordCount} words.`;
-                
-                // Call LLM again with the follow-up prompt
-                const shorterMatchingClause = await callOllama(phrase.text, followUpPrompt);
-                
-                // Log the revised word count
-                const revisedMatchWordCount = countWords(shorterMatchingClause);
-                logMessage(`Revised match word count: ${revisedMatchWordCount} (original: ${originalPhraseWordCount})`);
-                
-                // Verify the shortened response actually exists in the new text
-                // Clean both texts for comparison (remove punctuation, lowercase)
-                const cleanShorterMatch = shorterMatchingClause.toLowerCase().replace(/[.,;:!?()]/g, '').trim();
-                const cleanNewText = newText.toLowerCase().replace(/[.,;:!?()]/g, '').trim();
-                
-                // Only use the shorter match if it exists in the new text
-                if (cleanNewText.includes(cleanShorterMatch)) {
-                  matchingClause = shorterMatchingClause;
-                  logMessage(`Using shorter match: "${shorterMatchingClause}"`);
-                } else {
-                  logMessage(`Shorter match not found in new text, using original match: "${matchingClause}"`);
-                }
+              // Call LLM again with the follow-up prompt
+              const shorterText = await callOllama(originalText, followUpPrompt);
+              if (shorterText && shorterText.trim().length > 0) {
+                newText = shorterText;
               }
               
-              formattingMatches.push({
-                newText: matchingClause.trim(),
-                formatting: phrase.formatting
-              });
+              // Log the new word count
+              const revisedWordCount = countWords(newText);
+              logMessage(`Revised word count: ${revisedWordCount}`);
             }
+            
+            // Store the new text
+            paragraphCache[idx].reimagined.text = newText;
+            
+            // Process each non-modal phrase to find its match in new text
+            const formattingMatches = [];
+            for (const phrase of paragraphFormatting[idx].formattedClauses) {
+              try {
+                // Prepare clean versions for comparison
+                const cleanPhrase = phrase.text.toLowerCase().replace(/[.,;:!?()]/g, '').trim();
+                const cleanNewText = newText.toLowerCase().replace(/[.,;:!?()]/g, '').trim();
+                
+                // Check if the exact phrase exists as a whole word in the new text
+                const phraseRegex = new RegExp(`\\b${escapeRegExp(cleanPhrase)}\\b`, 'i');
+                
+                if (phraseRegex.test(cleanNewText)) {
+                  // Direct match found
+                  logMessage(`Direct match found for phrase: "${phrase.text}"`);
+                  
+                  // Find the actual case in the new text
+                  const match = newText.match(new RegExp(`\\b[^.,;:!?()]*${escapeRegExp(cleanPhrase)}[^.,;:!?()]*\\b`, 'i'));
+                  const exactMatch = match ? match[0].trim() : phrase.text;
+                  
+                  formattingMatches.push({
+                    newText: exactMatch,
+                    formatting: phrase.formatting
+                  });
+                } else {
+                  // No direct match, use LLM to find equivalent
+                  const matchPrompt = createClauseMatchPrompt(originalText, newText, phrase.text);
+                  let matchingClause = await callOllama(phrase.text, matchPrompt);
+                  
+                  if (!matchingClause || matchingClause.trim().length === 0) {
+                    // If LLM fails, use original phrase
+                    matchingClause = phrase.text;
+                  }
+                  
+                  formattingMatches.push({
+                    newText: matchingClause.trim(),
+                    formatting: phrase.formatting
+                  });
+                }
+              } catch (phraseError) {
+                logMessage(`Error processing phrase "${phrase.text}": ${phraseError}`);
+                // Add original phrase if there's an error
+                formattingMatches.push({
+                  newText: phrase.text,
+                  formatting: phrase.formatting
+                });
+              }
+            }
+            
+            // Store the formatting matches
+            paragraphCache[idx].reimagined.formattingMatches = formattingMatches;
+            
+          } catch (llmError) {
+            logMessage(`LLM processing error for paragraph ${idx + 1}: ${llmError}`);
+            // Clear reimagined content on error
+            paragraphCache[idx].reimagined = null;
+            continue;
           }
           
-          // Store both the new text and formatting matches
-          paragraphLLMOutputs[idx] = {
-            text: newText,
-            formattingMatches: formattingMatches
-          };
-          
           // Update UI if we're on this paragraph
-    if (idx === currentParagraphIndex) {
-      document.getElementById("modifiedText").value = newText;
-    }
+          if (idx === currentParagraphIndex) {
+            updateUIForSelectedParagraph();
+          }
           
         } catch (error) {
           logMessage(`Error processing paragraph ${idx + 1}: ${error.toString()}`);
@@ -710,16 +788,19 @@ function splitIntoSentences(text) {
  * Selects all paragraphs for reimagination.
  */
 function onSelectAll() {
-  for (let i = 0; i < paragraphs.length; i++) {
+  for (let i = 0; i < paragraphCache.length; i++) {
     // Only select paragraphs that meet our requirements
-    if (!shouldSkipParagraph(paragraphs[i])) {
-    selectedParagraphs.add(i);
+    if (!shouldSkipParagraph(paragraphCache[i].source)) {
+      selectedParagraphs.add(i);
+      paragraphCache[i].reimagineState = true;
     }
   }
   updateSelectedParagraphList();
+  
   // Update checkbox based on current paragraph
   const checkbox = document.getElementById("checkboxReimagine");
-  checkbox.checked = !shouldSkipParagraph(paragraphs[currentParagraphIndex]);
+  checkbox.checked = !shouldSkipParagraph(paragraphCache[currentParagraphIndex].source) && 
+                    paragraphCache[currentParagraphIndex].reimagineState;
   logMessage("All valid paragraphs selected for reimagination.");
 }
 
@@ -728,72 +809,67 @@ function onSelectAll() {
  */
 function onUnselectAll() {
   selectedParagraphs.clear();
+  paragraphCache.forEach(para => para.reimagineState = false);
   updateSelectedParagraphList();
   document.getElementById("checkboxReimagine").checked = false;
   logMessage("All paragraphs unselected.");
 }
 
 /**
- * Applies changes only to the current paragraph: replaces its text with the saved modified text.
+ * Applies changes only to the current paragraph
  */
 async function onApply() {
-  if (paragraphs.length === 0 || currentParagraphIndex < 0 || currentParagraphIndex >= paragraphs.length) {
+  if (paragraphCache.length === 0 || currentParagraphIndex < 0 || currentParagraphIndex >= paragraphCache.length) {
     logMessage("No valid paragraph selected to apply changes.");
     return;
   }
   
-  if (!paragraphLLMOutputs.hasOwnProperty(currentParagraphIndex)) {
+  if (!paragraphCache[currentParagraphIndex].reimagined?.text) {
     logMessage(`No modified text for paragraph ${currentParagraphIndex + 1}`);
     return;
   }
-  
-  // Get the current text from the UI (might have been manually edited)
-  const modifiedTextElement = document.getElementById("modifiedText");
-  const currentModifiedText = modifiedTextElement ? modifiedTextElement.value : null;
   
   logMessage(`Applying changes to paragraph ${currentParagraphIndex + 1}`);
   
   await Word.run(async (context) => {
     try {
       // Get all paragraphs
-    const body = context.document.body;
-    const paras = body.paragraphs;
-    paras.load("items");
-    await context.sync();
+      const body = context.document.body;
+      const paras = body.paragraphs;
+      paras.load("items");
+      await context.sync();
       
       if (currentParagraphIndex >= paras.items.length) {
         logMessage(`Error: Paragraph index ${currentParagraphIndex} out of bounds`);
         return;
       }
       
-      // Get the paragraph and output
+      // Get the paragraph and reimagined text
       const paragraph = paras.items[currentParagraphIndex];
-      const output = paragraphLLMOutputs[currentParagraphIndex];
-      
-      // Use modified text from UI if available, otherwise use stored LLM output
-      const textToInsert = currentModifiedText || output.text;
+      const reimaginedText = paragraphCache[currentParagraphIndex].reimagined.text;
       
       // Replace the text
-      paragraph.insertText(textToInsert, "Replace");
-    await context.sync();
-    
+      paragraph.insertText(reimaginedText, "Replace");
+      await context.sync();
+      
       // Apply formatting if available
-      if (output.formattingMatches && output.formattingMatches.length > 0) {
-        await applyFormatting(context, paragraph, output.formattingMatches);
+      if (paragraphCache[currentParagraphIndex].reimagined.formattingMatches?.length > 0) {
+        await applyFormatting(context, paragraph, paragraphCache[currentParagraphIndex].reimagined.formattingMatches);
       }
       
-      // Update only this paragraph in our source cache
-      paragraphs[currentParagraphIndex] = textToInsert;
+      // Update source cache with the new text
+      paragraphCache[currentParagraphIndex].source = reimaginedText;
       
-      // Clear this entry from LLM outputs since it's now applied
-    delete paragraphLLMOutputs[currentParagraphIndex];
-    selectedParagraphs.delete(currentParagraphIndex);
+      // Clear reimagined content and state
+      paragraphCache[currentParagraphIndex].reimagined = null;
+      paragraphCache[currentParagraphIndex].reimagineState = false;
+      selectedParagraphs.delete(currentParagraphIndex);
       
       logMessage(`Successfully applied changes to paragraph ${currentParagraphIndex + 1}`);
       
       // Update UI
       updateUIForSelectedParagraph();
-    updateSelectedParagraphList();
+      updateSelectedParagraphList();
       
     } catch (error) {
       logMessage(`Error in onApply: ${error}`);
@@ -802,69 +878,46 @@ async function onApply() {
 }
 
 /**
- * Applies changes to all selected paragraphs.
+ * Applies changes to all selected paragraphs
  */
 async function onApplyAll() {
-  if (paragraphs.length === 0) {
+  if (paragraphCache.length === 0) {
     logMessage("No paragraphs available to apply changes.");
     return;
   }
+  
   await Word.run(async (context) => {
-    // Only get paragraphs from the main document body, not headers/footers
     const body = context.document.body;
     const paras = body.paragraphs;
     paras.load("items");
     await context.sync();
     
-    // Track how many paragraphs we've processed
     let appliedCount = 0;
     let skippedCount = 0;
     
     for (let idx of selectedParagraphs) {
-      if (paragraphLLMOutputs.hasOwnProperty(idx) && idx < paras.items.length) {
+      if (paragraphCache[idx].reimagined?.text && idx < paras.items.length) {
         try {
-          const output = paragraphLLMOutputs[idx];
           const paragraph = paras.items[idx];
+          const reimaginedText = paragraphCache[idx].reimagined.text;
           
-          // Verify this is a paragraph in the main document body
-          // by checking if it has text that matches what we expect
-          paragraph.load("text");
-          await context.sync();
-          
-          // If paragraph text doesn't match what we expect, it might be in a header/footer
-          // or the document structure might have changed
-          if (!paragraph.text.includes(paragraphs[idx].substring(0, 30))) {
-            logMessage(`Skipping paragraph ${idx + 1} - text doesn't match expected content`);
-            skippedCount++;
-            continue;
-          }
-          
-          // Insert the new text
-          paragraph.insertText(output.text, "Replace");
+          // Replace the text
+          paragraph.insertText(reimaginedText, "Replace");
           await context.sync();
           
           // Apply formatting
-          if (output.formattingMatches) {
-            try {
-              await applyFormatting(context, paragraph, output.formattingMatches);
-            } catch (error) {
-              logMessage(`Error applying formatting to paragraph ${idx + 1}: ${error}`);
-            }
-          } else {
-            // If no special formatting, apply the original paragraph's default font settings
-            const defaultFont = paragraphFormatting[idx]?.defaultFont;
-            if (defaultFont) {
-              paragraph.font.size = defaultFont.size;
-              paragraph.font.name = defaultFont.name;
-              paragraph.font.bold = defaultFont.bold;
-              paragraph.font.italic = defaultFont.italic;
-              await context.sync();
-              logMessage(`Applied default font settings to paragraph ${idx + 1}`);
-            }
+          if (paragraphCache[idx].reimagined.formattingMatches?.length > 0) {
+            await applyFormatting(context, paragraph, paragraphCache[idx].reimagined.formattingMatches);
           }
           
-          logMessage(`Applied text and formatting to paragraph ${idx + 1}`);
-        delete paragraphLLMOutputs[idx];
+          // Update source cache with the new text
+          paragraphCache[idx].source = reimaginedText;
+          
+          // Clear reimagined content and state
+          paragraphCache[idx].reimagined = null;
+          paragraphCache[idx].reimagineState = false;
+          
+          logMessage(`Applied changes to paragraph ${idx + 1}`);
           appliedCount++;
         } catch (error) {
           logMessage(`Error processing paragraph ${idx + 1}: ${error}`);
@@ -879,11 +932,11 @@ async function onApplyAll() {
     await context.sync();
     logMessage(`Apply All completed: ${appliedCount} paragraphs updated, ${skippedCount} skipped`);
     
-    // Reload paragraphs and update UI
-    await loadParagraphsFromDocument();
     // Clear all selections since we've applied everything
     selectedParagraphs.clear();
     updateSelectedParagraphList();
+    updateUIForSelectedParagraph();
+    
   }).catch((error) => logMessage("Error in onApplyAll: " + error));
 }
 
@@ -955,26 +1008,51 @@ async function callOllama(paragraphText, userPrompt) {
     const requestData = {
       paragraphText: paragraphText,
       userPrompt: userPrompt,
-      model: selectedModel // Add the selected model to the request
+      model: selectedModel
     };
     logMessage("Sending request to LLM server: " + JSON.stringify(requestData));
-    const response = await fetch("https://localhost:8000/ollama", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(requestData)
-    });
-    if (!response.ok) {
-      logMessage("Error from LLM server: " + response.statusText);
-      return paragraphText; // fallback: return original text on error.
+    
+    // Add retry logic
+    let attempts = 0;
+    const maxAttempts = 3;
+    let lastError = null;
+    
+    while (attempts < maxAttempts) {
+      try {
+        const response = await fetch("https://localhost:8000/ollama", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(requestData)
+        });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        if (!data.result || data.result.trim().length === 0) {
+          throw new Error("Empty response from LLM");
+        }
+        
+        logMessage("LLM server response received");
+        return data.result;
+      } catch (error) {
+        lastError = error;
+        attempts++;
+        if (attempts < maxAttempts) {
+          logMessage(`Attempt ${attempts} failed, retrying...`);
+          await new Promise(resolve => setTimeout(resolve, 1000 * attempts)); // Exponential backoff
+        }
+      }
     }
-    const data = await response.json();
-    logMessage("LLM server response: " + JSON.stringify(data));
-    return data.result || paragraphText;
+    
+    logMessage(`Failed to call LLM service after ${maxAttempts} attempts: ${lastError}`);
+    return paragraphText; // fallback to original text
   } catch (err) {
     logMessage("Failed to call LLM service: " + err);
-    return paragraphText;
+    return paragraphText; // fallback to original text
   }
 }
 
@@ -1012,8 +1090,8 @@ async function applyFormatting(context, paragraph, formattingMatches) {
           continue;
         }
         
-        // Limit search text to 255 characters to avoid "too long" error
-        const searchText = match.newText.trim().substring(0, Math.min(255, match.newText.trim().length));
+        // Limit search text to 100 characters to avoid "too long" error
+        const searchText = match.newText.trim().substring(0, Math.min(100, match.newText.trim().length));
         
         if (searchText.length < 3) {
           logMessage(`Search text too short: "${searchText}"`);
@@ -1038,7 +1116,35 @@ async function applyFormatting(context, paragraph, formattingMatches) {
           await context.sync();
           logMessage(`Applied formatting to: "${searchText}"`);
         } else {
-          logMessage(`Could not find text to format: "${searchText}"`);
+          // Try searching for chunks if the text is too long
+          const chunks = getSearchableChunks(match.newText);
+          let found = false;
+          
+          for (const chunk of chunks) {
+            if (chunk.trim().length < 3) continue;
+            
+            const chunkRanges = paragraph.search(chunk, {matchCase: false, matchWholeWord: false});
+            chunkRanges.load("items");
+            await context.sync();
+            
+            if (chunkRanges.items.length > 0) {
+              const range = chunkRanges.items[0];
+              
+              // Apply formatting
+              if (match.formatting.bold !== null) range.font.bold = match.formatting.bold;
+              if (match.formatting.italic !== null) range.font.italic = match.formatting.italic;
+              if (match.formatting.size !== null) range.font.size = match.formatting.size;
+              
+              await context.sync();
+              logMessage(`Applied formatting to chunk: "${chunk}"`);
+              found = true;
+              break;
+            }
+          }
+          
+          if (!found) {
+            logMessage(`Could not find text to format: "${searchText}"`);
+          }
         }
       } catch (matchError) {
         logMessage(`Error processing format match: ${matchError}`);
@@ -1062,13 +1168,18 @@ function escapeRegExp(string) {
  */
 function debugParagraphInfo() {
   logMessage("------ DEBUG INFO ------");
-  logMessage(`paragraphs array length: ${paragraphs.length}`);
+  logMessage(`paragraphCache array length: ${paragraphCache.length}`);
   logMessage(`currentParagraphIndex: ${currentParagraphIndex}`);
+  logMessage(`Selected paragraphs: ${Array.from(selectedParagraphs).join(', ')}`);
   
-  if (paragraphs.length > 0 && currentParagraphIndex >= 0 && currentParagraphIndex < paragraphs.length) {
-    logMessage(`Current paragraph content: "${paragraphs[currentParagraphIndex].substring(0, 30)}..."`);
+  if (paragraphCache.length > 0 && currentParagraphIndex >= 0 && currentParagraphIndex < paragraphCache.length) {
+    const current = paragraphCache[currentParagraphIndex];
+    logMessage(`Current paragraph:`);
+    logMessage(`- Source: "${current.source.substring(0, 30)}..."`);
+    logMessage(`- Reimagined: ${current.reimagined ? "Yes" : "No"}`);
+    logMessage(`- ReimagineState: ${current.reimagineState}`);
   } else {
-    logMessage("Current paragraph content: [INVALID INDEX]");
+    logMessage("Current paragraph: [INVALID INDEX]");
   }
   logMessage("------------------------");
 }
@@ -1077,8 +1188,8 @@ function debugParagraphInfo() {
  * Navigates to the next paragraph.
  */
 function onNextParagraph() {
-  if (paragraphs.length === 0) return;
-  currentParagraphIndex = (currentParagraphIndex + 1) % paragraphs.length;
+  if (paragraphCache.length === 0) return;
+  currentParagraphIndex = (currentParagraphIndex + 1) % paragraphCache.length;
   debugParagraphInfo();
   
   try {
@@ -1093,8 +1204,8 @@ function onNextParagraph() {
  * Navigates to the previous paragraph.
  */
 function onPrevParagraph() {
-  if (paragraphs.length === 0) return;
-  currentParagraphIndex = (currentParagraphIndex - 1 + paragraphs.length) % paragraphs.length;
+  if (paragraphCache.length === 0) return;
+  currentParagraphIndex = (currentParagraphIndex - 1 + paragraphCache.length) % paragraphCache.length;
   debugParagraphInfo();
   
   try {
@@ -1106,61 +1217,48 @@ function onPrevParagraph() {
 }
 
 /**
- * Updates the UI to show the text for the currently selected paragraph.
- */
-function updateUIForSelectedParagraph() {
-  if (paragraphs.length === 0 || currentParagraphIndex < 0 || currentParagraphIndex >= paragraphs.length) {
-    document.getElementById("originalText").value = "";
-    document.getElementById("modifiedText").value = "";
-    document.getElementById("paragraphLabel").textContent = "No paragraph selected";
-    document.getElementById("reimagineCheckbox").checked = false;
-    return;
-  }
-  
-  // Update the paragraph number display
-  document.getElementById("paragraphLabel").textContent = 
-    `Paragraph ${currentParagraphIndex + 1} of ${paragraphs.length}`;
-  
-  // Display the original text
-  document.getElementById("originalText").value = paragraphs[currentParagraphIndex];
-  
-  // Display the modified text if available, otherwise show empty box
-  if (paragraphLLMOutputs.hasOwnProperty(currentParagraphIndex)) {
-    document.getElementById("modifiedText").value = paragraphLLMOutputs[currentParagraphIndex].text;
-  } else {
-    document.getElementById("modifiedText").value = "";
-  }
-  
-  // Update the reimagine checkbox
-  document.getElementById("reimagineCheckbox").checked = selectedParagraphs.has(currentParagraphIndex);
-  
-  // Update highlights in the document
-  highlightCurrentParagraph();
-}
-
-/**
- * Refreshes the source cache and clears the reimagined cache.
+ * Refreshes the source cache and clears reimagined content
  */
 async function onRefresh() {
   logMessage("Refreshing document...");
   
-  // Clear the reimagined cache
-  paragraphLLMOutputs = {};
-  
-  // Reload paragraphs from document
-  await loadParagraphsFromDocument();
-  
-  // Update UI to reflect changes
-  updateUIForSelectedParagraph();
-  updateSelectedParagraphList();
-  
-  logMessage("Document refreshed - all paragraphs reloaded and LLM outputs cleared");
+  await Word.run(async (context) => {
+    const body = context.document.body;
+    const paras = body.paragraphs;
+    paras.load("items");
+    await context.sync();
+    
+    // Create new cache array
+    const newCache = [];
+    
+    for (let i = 0; i < paras.items.length; i++) {
+      // Check if paragraph should be skipped before adding to cache
+      const text = paras.items[i].text;
+      newCache.push({
+        source: text,
+        reimagined: null,
+        reimagineState: false
+      });
+    }
+    
+    // Replace the old cache with the new one
+    paragraphCache = newCache;
+    
+    // Clear selected paragraphs
+    selectedParagraphs.clear();
+    
+    // Update UI
+    updateUIForSelectedParagraph();
+    updateSelectedParagraphList();
+    
+    logMessage("Document refreshed - all paragraphs reloaded and reimagined content cleared");
+  }).catch((error) => logMessage("Error in onRefresh: " + error));
 }
 
 /**
  * For long paragraphs, breaks the text into searchable chunks.
  */
-function getSearchableChunks(text, maxLength = 255) {
+function getSearchableChunks(text, maxLength = 100) {
   const chunks = [];
   let start = 0;
   
