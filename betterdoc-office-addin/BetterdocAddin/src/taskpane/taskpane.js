@@ -569,9 +569,26 @@ async function onReimagine() {
           
           try {
             // Get rewritten text from LLM with retry logic
-            let newText = await callOllama(originalText, prompt);
+            // **** Combine the base prompt with the actual paragraph text ****
+            const combinedPrompt = `${prompt}\n\nParagraph to rewrite:\n${originalText}`;
+            const ollamaResult = await callOllama(combinedPrompt);
+            
+            // Check for errors from callOllama first
+            if (ollamaResult.error) {
+              throw new Error(`Ollama call failed: ${ollamaResult.error}`);
+            }
+            
+            // Extract the actual response text
+            let newText = ollamaResult.response; 
+
             if (!newText || newText.trim().length === 0) {
-              throw new Error("Empty response from LLM");
+              // Check if rawData exists and has a response, maybe parsing was slightly off
+              if (ollamaResult.rawData && ollamaResult.rawData.response) {
+                 newText = ollamaResult.rawData.response;
+                 logMessage("Used response from rawData as fallback.");
+              } else {
+                 throw new Error("Empty response from LLM");
+              }
             }
             
             // Check word count
@@ -583,12 +600,21 @@ async function onReimagine() {
               logMessage(`Word count exceeded: Original=${originalWordCount}, New=${newWordCount}`);
               
               // Create a follow-up prompt asking for shorter text
-              const followUpPrompt = `${prompt}\n\nYou failed to do as instructed and exceeded the word count. Try again and reduce your word count. The original had ${originalWordCount} words, yours had ${newWordCount}.`;
+              const followUpBasePrompt = `${prompt}\n\nYou failed to do as instructed and exceeded the word count. Try again and reduce your word count. The original had ${originalWordCount} words, yours had ${newWordCount}.`;
+              // **** Combine follow-up prompt with the problematic *new* text ****
+              const combinedFollowUpPrompt = `${followUpBasePrompt}\n\nRewrite this text specifically:\n${newText}`;
               
               // Call LLM again with the follow-up prompt
-              const shorterText = await callOllama(originalText, followUpPrompt);
-              if (shorterText && shorterText.trim().length > 0) {
-                newText = shorterText;
+              const shorterOllamaResult = await callOllama(combinedFollowUpPrompt);
+              
+              // Handle potential error from the second call
+              if (shorterOllamaResult.error) {
+                 logMessage(`Warning: Follow-up Ollama call failed: ${shorterOllamaResult.error}. Using previous text.`);
+              } else {
+                  const shorterText = shorterOllamaResult.response;
+                  if (shorterText && shorterText.trim().length > 0) {
+                    newText = shorterText;
+                  }
               }
               
               // Log the new word count
@@ -624,12 +650,20 @@ async function onReimagine() {
                   });
                 } else {
                   // No direct match, use LLM to find equivalent
+                  // **** The matchPrompt already includes necessary context ****
                   const matchPrompt = createClauseMatchPrompt(originalText, newText, phrase.text);
-                  let matchingClause = await callOllama(phrase.text, matchPrompt);
+                  const matchingClauseResult = await callOllama(matchPrompt);
+                  let matchingClause;
                   
-                  if (!matchingClause || matchingClause.trim().length === 0) {
-                    // If LLM fails, use original phrase
-                    matchingClause = phrase.text;
+                  if (matchingClauseResult.error) {
+                     logMessage(`Warning: Clause match Ollama call failed: ${matchingClauseResult.error}. Using original phrase.`);
+                     matchingClause = phrase.text; // Fallback to original on error
+                  } else {
+                      matchingClause = matchingClauseResult.response;
+                      if (!matchingClause || matchingClause.trim().length === 0) {
+                        // If LLM fails to provide a clause, use original phrase
+                        matchingClause = phrase.text;
+                      }
                   }
                   
                   formattingMatches.push({
@@ -1003,57 +1037,67 @@ function onModelSelectChange() {
 /**
  * Calls our local LLM-like service with a paragraph and prompt.
  */
-async function callOllama(paragraphText, userPrompt) {
-  try {
-    const requestData = {
-      paragraphText: paragraphText,
-      userPrompt: userPrompt,
-      model: selectedModel
-    };
-    logMessage("Sending request to LLM server: " + JSON.stringify(requestData));
-    
-    // Add retry logic
-    let attempts = 0;
-    const maxAttempts = 3;
-    let lastError = null;
-    
-    while (attempts < maxAttempts) {
-      try {
-        const response = await fetch("https://localhost:8000/ollama", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify(requestData)
-        });
-        
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const data = await response.json();
-        if (!data.result || data.result.trim().length === 0) {
-          throw new Error("Empty response from LLM");
-        }
-        
-        logMessage("LLM server response received");
-        return data.result;
-      } catch (error) {
-        lastError = error;
-        attempts++;
-        if (attempts < maxAttempts) {
-          logMessage(`Attempt ${attempts} failed, retrying...`);
-          await new Promise(resolve => setTimeout(resolve, 1000 * attempts)); // Exponential backoff
-        }
-      }
-    }
-    
-    logMessage(`Failed to call LLM service after ${maxAttempts} attempts: ${lastError}`);
-    return paragraphText; // fallback to original text
-  } catch (err) {
-    logMessage("Failed to call LLM service: " + err);
-    return paragraphText; // fallback to original text
+async function callOllama(prompt, maxRetries = 3) {
+  const selectedModel = document.getElementById("modelSelect").value;
+  if (!selectedModel) {
+    logMessage("Error: No model selected.");
+    return { error: "No model selected" };
   }
+  const url = `http://localhost:11434/api/generate`; // Ensure this matches your Ollama endpoint
+
+  const body = JSON.stringify({
+    model: selectedModel,
+    prompt: prompt,
+    stream: false, // Ensure response is not streamed for easier handling
+  });
+
+  // Log the full prompt being sent
+  logMessage(`Sending request to Ollama (${selectedModel}). Full Prompt: ${prompt}`);
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: body,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      // Get raw text first
+      const rawResponseText = await response.text();
+      logMessage(`Raw server response received: ${rawResponseText}`); // Log the raw response
+
+      // Now parse the raw text
+      const data = JSON.parse(rawResponseText); 
+      
+      if (!data || !data.response) {
+        logMessage(`Warning: Ollama response missing 'response' field. Full data: ${JSON.stringify(data)}`);
+        // Depending on expected behavior, you might return null or throw an error
+        // For now, let's return the structure indicating an issue but not crash
+        return { response: null, error: "Invalid response structure from Ollama", rawData: data }; 
+      }
+      
+      logMessage("Server response parsed successfully.");
+      return data; // Return the parsed data
+
+    } catch (error) {
+      logMessage(`Attempt ${attempt} failed: ${error.message}`);
+      if (attempt === maxRetries) {
+        logMessage("Max retries reached. Failing.");
+        return { error: error.message };
+      }
+      const delay = Math.pow(2, attempt - 1) * 1000; // Exponential backoff
+      logMessage(`Retrying in ${delay / 1000} seconds...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  // Should not be reached if maxRetries > 0, but added for safety
+  return { error: "Failed after multiple retries" }; 
 }
 
 /**
