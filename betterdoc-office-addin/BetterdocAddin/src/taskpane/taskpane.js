@@ -149,39 +149,23 @@ function shouldSkipParagraph(text) {
  */
 async function detectFormatting(context, paragraph, index) {
   try {
-    // First, get character-by-character formatting
-    const ranges = paragraph.getTextRanges([" "]);  // Split by spaces instead of characters
-    ranges.load("items");
+    // Still split by spaces for analysis
+    const ranges = paragraph.getTextRanges([" "], false); 
+    ranges.load("items/text, items/font/bold, items/font/italic, items/font/size, items/font/underline"); 
     await context.sync();
-    
-    // First pass: collect all formatting to find mode
+
+    // Calculate Modal Format (remains the same logic)
     const formatDistribution = new Map();
-    const formattingByRange = [];
-    
     for (let i = 0; i < ranges.items.length; i++) {
       const range = ranges.items[i];
-      range.load(["text", "font/bold", "font/italic", "font/size", "font/name"]);
-      await context.sync();
-      
-      const formatting = {
-        text: range.text,
+      const formatKey = JSON.stringify({
         bold: range.font.bold,
         italic: range.font.italic,
         size: range.font.size,
-        name: range.font.name
-      };
-      formattingByRange.push(formatting);
-      
-      const formatKey = JSON.stringify({
-        bold: formatting.bold,
-        italic: formatting.italic,
-        size: formatting.size
+        underline: range.font.underline 
       });
-      
-      formatDistribution.set(formatKey, (formatDistribution.get(formatKey) || 0) + 1);
+      formatDistribution.set(formatKey, (formatDistribution.get(formatKey) || 0) + range.text.length); 
     }
-    
-    // Find modal formatting
     let modalFormat = null;
     let maxCount = 0;
     for (const [key, count] of formatDistribution) {
@@ -190,63 +174,67 @@ async function detectFormatting(context, paragraph, index) {
         modalFormat = JSON.parse(key);
       }
     }
-    
-    // Initialize formatting info for this paragraph
-    paragraphFormatting[index] = {
-      defaultFont: modalFormat,
-      formattedClauses: []
-    };
-    
+    // --- End Modal Format Calculation ---
+
+    paragraphFormatting[index] = { defaultFont: modalFormat, formattedClauses: [] };
     logMessage(`\nFormatting analysis for paragraph ${index + 1}:`);
     logMessage(`Modal formatting: ${JSON.stringify(modalFormat)}`);
     
-    // Second pass: detect non-modal phrases
-    let currentPhrase = null;
-    
-    for (let i = 0; i < formattingByRange.length; i++) {
-      const current = formattingByRange[i];
-      
-      // Check if current range deviates from modal
-      const isNonModal = 
-        current.bold !== modalFormat.bold ||
-        current.italic !== modalFormat.italic ||
-        current.size !== modalFormat.size ||
-        // If previous word was non-modal and this has null where previous had non-modal value
-        (currentPhrase && 
-         ((current.bold === null && currentPhrase.formatting.bold !== modalFormat.bold) ||
-          (current.italic === null && currentPhrase.formatting.italic !== modalFormat.italic) ||
-          (current.size === null && currentPhrase.formatting.size !== modalFormat.size)));
-      
+    // --- Revised Second pass for better phrase merging --- 
+    let currentPhraseText = "";
+    let currentPhraseFormatting = null;
+
+    for (let i = 0; i < ranges.items.length; i++) {
+      const range = ranges.items[i];
+      const currentText = range.text;
+      const currentFormat = { 
+         bold: range.font.bold, 
+         italic: range.font.italic, 
+         size: range.font.size, 
+         underline: range.font.underline 
+      };
+      const currentFormatKey = JSON.stringify(currentFormat);
+      const modalFormatKey = JSON.stringify(modalFormat);
+      const isNonModal = (currentFormatKey !== modalFormatKey);
+
       if (isNonModal) {
-        if (!currentPhrase) {
-          // Start new phrase
-          currentPhrase = {
-            text: current.text,
-            formatting: {
-              bold: current.bold,
-              italic: current.italic,
-              size: current.size
-            }
-          };
+        // If starting a new phrase OR if the format changes from the previous non-modal
+        if (!currentPhraseFormatting || JSON.stringify(currentPhraseFormatting) !== currentFormatKey) {
+           // Finalize the previous phrase if it existed
+           if (currentPhraseFormatting) { 
+              // Trim only trailing spaces, preserve internal ones for matching
+              paragraphFormatting[index].formattedClauses.push({
+                 text: currentPhraseText.replace(/\s+$/, ''), 
+                 formatting: currentPhraseFormatting 
+              });
+           }
+           // Start the new phrase
+           currentPhraseText = currentText;
+           currentPhraseFormatting = currentFormat;
         } else {
-          // Continue current phrase
-          currentPhrase.text += current.text;
+           // Continue the current phrase (same non-modal format)
+           currentPhraseText += currentText;
         }
-      } else if (currentPhrase) {
-        // End current phrase
-        paragraphFormatting[index].formattedClauses.push({
-          text: currentPhrase.text.trim(),
-          formatting: currentPhrase.formatting
-        });
-        currentPhrase = null;
+      } else { // Current range IS modal
+        // If we were building a non-modal phrase, finalize it now
+        if (currentPhraseFormatting) {
+           paragraphFormatting[index].formattedClauses.push({
+              text: currentPhraseText.replace(/\s+$/, ''),
+              formatting: currentPhraseFormatting
+           });
+           currentPhraseText = "";
+           currentPhraseFormatting = null;
+        }
+        // Append the modal text (like spaces) to the *next* potential non-modal phrase start
+        // Or just ignore it if we want clauses to be purely non-modal text? Let's ignore for now.
       }
     }
     
-    // Don't forget last phrase
-    if (currentPhrase) {
+    // Don't forget the last phrase if it was non-modal
+    if (currentPhraseFormatting) {
       paragraphFormatting[index].formattedClauses.push({
-        text: currentPhrase.text.trim(),
-        formatting: currentPhrase.formatting
+        text: currentPhraseText.replace(/\s+$/, ''),
+        formatting: currentPhraseFormatting
       });
     }
     
@@ -262,9 +250,13 @@ async function detectFormatting(context, paragraph, index) {
     
     return paragraphFormatting[index].formattedClauses;
     
-  } catch (error) {
-    logMessage(`Error in detectFormatting: ${error.toString()}`);
-    throw error;
+  } catch (error) { 
+      logMessage(`Error in detectFormatting: ${error.toString()}`);
+      if (!paragraphFormatting[index]) {
+          paragraphFormatting[index] = { defaultFont: null, formattedClauses: [] };
+      }
+      paragraphFormatting[index].formattedClauses = []; 
+      throw error; 
   }
 }
 
@@ -537,180 +529,334 @@ function onDown() {
  * Processes all selected paragraphs by sending them sequentially to the LLM.
  */
 async function onReimagine() {
+  logMessage("Starting reimagination process...");
   if (selectedParagraphs.size === 0) {
     logMessage("No paragraphs selected for reimagination.");
     return;
   }
-  
-  const prompt = getPrompt();
-  
-  try {
-    await Word.run(async (context) => {
-      const body = context.document.body;
-      const paras = body.paragraphs;
-      paras.load("items");
-      await context.sync();
-      
-      for (let idx of selectedParagraphs) {
-        try {
-          const originalText = paragraphCache[idx].source;
-          logMessage(`Processing paragraph ${idx + 1}`);
-          
-          // First detect formatting
-          await detectFormatting(context, paras.items[idx], idx);
-          
-          // Initialize reimagined structure if it doesn't exist
-          if (!paragraphCache[idx].reimagined) {
-            paragraphCache[idx].reimagined = {
-              text: "",
-              formattingMatches: []
-            };
-          }
-          
-          try {
-            // Get rewritten text from LLM with retry logic
-            // **** Combine the base prompt with the actual paragraph text ****
-            const combinedPrompt = `${prompt}\n\nParagraph to rewrite:\n${originalText}`;
-            const ollamaResult = await callOllama(combinedPrompt);
-            
-            // Check for errors from callOllama first
-            if (ollamaResult.error) {
-              throw new Error(`Ollama call failed: ${ollamaResult.error}`);
-            }
-            
-            // Extract the actual response text
-            let newText = ollamaResult.response; 
 
-            if (!newText || newText.trim().length === 0) {
-              // Check if rawData exists and has a response, maybe parsing was slightly off
-              if (ollamaResult.rawData && ollamaResult.rawData.response) {
-                 newText = ollamaResult.rawData.response;
-                 logMessage("Used response from rawData as fallback.");
-              } else {
-                 throw new Error("Empty response from LLM");
-              }
-            }
-            
-            // Check word count
-            const originalWordCount = countWords(originalText);
-            const newWordCount = countWords(newText);
-            
-            // If new text is more than 10% longer, ask for a shorter version
-            if (newWordCount > originalWordCount * 1.1) {
-              logMessage(`Word count exceeded: Original=${originalWordCount}, New=${newWordCount}`);
-              
-              // Create a follow-up prompt asking for shorter text
-              const followUpBasePrompt = `${prompt}\n\nYou failed to do as instructed and exceeded the word count. Try again and reduce your word count. The original had ${originalWordCount} words, yours had ${newWordCount}.`;
-              // **** Combine follow-up prompt with the problematic *new* text ****
-              const combinedFollowUpPrompt = `${followUpBasePrompt}\n\nRewrite this text specifically:\n${newText}`;
-              
-              // Call LLM again with the follow-up prompt
-              const shorterOllamaResult = await callOllama(combinedFollowUpPrompt);
-              
-              // Handle potential error from the second call
-              if (shorterOllamaResult.error) {
-                 logMessage(`Warning: Follow-up Ollama call failed: ${shorterOllamaResult.error}. Using previous text.`);
-              } else {
-                  const shorterText = shorterOllamaResult.response;
-                  if (shorterText && shorterText.trim().length > 0) {
-                    newText = shorterText;
+  // Disable buttons during processing
+  // TODO: Add logic to disable/enable buttons
+
+  await Word.run(async (context) => {
+    const body = context.document.body;
+    const paras = body.paragraphs;
+    // **** Load hyperlinks along with items ****
+    paras.load("items, items/hyperlinks"); 
+    await context.sync();
+
+    let processedCount = 0;
+    let errorCount = 0;
+
+    // Create a copy for iteration as selectedParagraphs might change
+    const paragraphsToProcess = Array.from(selectedParagraphs); 
+
+    for (let idx of paragraphsToProcess) {
+      // Bounds check for cache and actual paragraphs
+      if (idx < 0 || idx >= paragraphCache.length || idx >= paras.items.length) {
+        logMessage(`Skipping invalid index ${idx}. Cache size: ${paragraphCache.length}, Doc paras: ${paras.items.length}`);
+        selectedParagraphs.delete(idx); // Remove invalid index
+        errorCount++;
+        continue;
+      }
+
+      // Check if paragraph is still intended for reimagining
+      if (!paragraphCache[idx].reimagineState) {
+        // This check might be redundant if paragraphsToProcess uses selectedParagraphs, 
+        // but good for safety if selection changes during the async process.
+        logMessage(`Skipping paragraph ${idx + 1} as it's no longer marked for reimagining.`);
+        continue; 
+      }
+
+      const paragraph = paras.items[idx];
+      const paragraphRange = paragraph.getRange();
+
+      // --- Call NEW detectFormatting ---
+      logMessage(`Detecting formatting for paragraph ${idx + 1}...`);
+      try {
+        await detectFormatting(context, paragraph, idx);
+      } catch (fmtError) {
+        if (!paragraphFormatting[idx]) { paragraphFormatting[idx] = { defaultFont: null, formattedClauses: [] }; }
+      }
+      // --- End NEW detectFormatting ---
+
+      // --- Get Hyperlinks (using getHyperlinkRanges) --- 
+      const hyperlinkRanges = paragraphRange.getHyperlinkRanges();
+      hyperlinkRanges.load("items/text, items/hyperlink");
+      // --- End Get Hyperlinks --- 
+
+      // Load paragraph text needed for multiple steps
+      paragraph.load("text");
+      await context.sync(); // Sync after format detection and link setup
+
+      const originalText = paragraph.text;
+      let prompt = getPrompt(); // Get base prompt instructions
+
+      // ---- Revised Leading Formatting Check ----
+      let leadingFormatText = ""; 
+      let textToSendToLLM = originalText;
+      let leadingFormat = null; 
+      let leadingLength = 0;
+      let currentPos = 0; // Track position in originalText
+
+      const initialClauses = paragraphFormatting[idx]?.formattedClauses || [];
+      const modalFormatKeyCheck = JSON.stringify(paragraphFormatting[idx]?.defaultFont);
+
+      for (let i = 0; i < initialClauses.length; i++) {
+          const clause = initialClauses[i];
+          // Check if clause text starts exactly at the current position
+          if (clause.text && originalText.substring(currentPos).startsWith(clause.text)) {
+              // Is this clause non-modal?
+              const clauseFormatKey = JSON.stringify(clause.formatting);
+              if (clauseFormatKey !== modalFormatKeyCheck) {
+                  // It's a leading non-modal clause, append it
+                  leadingFormatText += clause.text;
+                  currentPos += clause.text.length;
+                  if (leadingFormat === null) { // Store the format of the very first one
+                    leadingFormat = clause.formatting;
                   }
-              }
-              
-              // Log the new word count
-              const revisedWordCount = countWords(newText);
-              logMessage(`Revised word count: ${revisedWordCount}`);
-            }
-            
-            // Store the new text
-            paragraphCache[idx].reimagined.text = newText;
-            
-            // Process each non-modal phrase to find its match in new text
-            const formattingMatches = [];
-            for (const phrase of paragraphFormatting[idx].formattedClauses) {
-              try {
-                // Prepare clean versions for comparison
-                const cleanPhrase = phrase.text.toLowerCase().replace(/[.,;:!?()]/g, '').trim();
-                const cleanNewText = newText.toLowerCase().replace(/[.,;:!?()]/g, '').trim();
-                
-                // Check if the exact phrase exists as a whole word in the new text
-                const phraseRegex = new RegExp(`\\b${escapeRegExp(cleanPhrase)}\\b`, 'i');
-                
-                if (phraseRegex.test(cleanNewText)) {
-                  // Direct match found
-                  logMessage(`Direct match found for phrase: "${phrase.text}"`);
-                  
-                  // Find the actual case in the new text
-                  const match = newText.match(new RegExp(`\\b[^.,;:!?()]*${escapeRegExp(cleanPhrase)}[^.,;:!?()]*\\b`, 'i'));
-                  const exactMatch = match ? match[0].trim() : phrase.text;
-                  
-                  formattingMatches.push({
-                    newText: exactMatch,
-                    formatting: phrase.formatting
-                  });
-                } else {
-                  // No direct match, use LLM to find equivalent
-                  // **** The matchPrompt already includes necessary context ****
-                  const matchPrompt = createClauseMatchPrompt(originalText, newText, phrase.text);
-                  const matchingClauseResult = await callOllama(matchPrompt);
-                  let matchingClause;
-                  
-                  if (matchingClauseResult.error) {
-                     logMessage(`Warning: Clause match Ollama call failed: ${matchingClauseResult.error}. Using original phrase.`);
-                     matchingClause = phrase.text; // Fallback to original on error
-                  } else {
-                      matchingClause = matchingClauseResult.response;
-                      if (!matchingClause || matchingClause.trim().length === 0) {
-                        // If LLM fails to provide a clause, use original phrase
-                        matchingClause = phrase.text;
-                      }
+                  // Check for spaces following the clause which might also be part of the lead
+                  const remainingText = originalText.substring(currentPos);
+                  const spaceMatch = remainingText.match(/^\s+/);
+                  if (spaceMatch) {
+                     leadingFormatText += spaceMatch[0];
+                     currentPos += spaceMatch[0].length;
                   }
-                  
-                  formattingMatches.push({
-                    newText: matchingClause.trim(),
-                    formatting: phrase.formatting
-                  });
-                }
-              } catch (phraseError) {
-                logMessage(`Error processing phrase "${phrase.text}": ${phraseError}`);
-                // Add original phrase if there's an error
-                formattingMatches.push({
-                  newText: phrase.text,
-                  formatting: phrase.formatting
-                });
+
+              } else {
+                  // We hit a modal clause at the start, stop checking
+                  break;
               }
-            }
-            
-            // Store the formatting matches
-            paragraphCache[idx].reimagined.formattingMatches = formattingMatches;
-            
-          } catch (llmError) {
-            logMessage(`LLM processing error for paragraph ${idx + 1}: ${llmError}`);
-            // Clear reimagined content on error
-            paragraphCache[idx].reimagined = null;
-            continue;
+          } else {
+              // Clause doesn't start immediately after previous leading text, stop
+              break;
           }
-          
-          // Update UI if we're on this paragraph
-          if (idx === currentParagraphIndex) {
-            updateUIForSelectedParagraph();
-          }
-          
-        } catch (error) {
-          logMessage(`Error processing paragraph ${idx + 1}: ${error.toString()}`);
+      }
+      leadingLength = currentPos; // Use final position as length
+
+      if (leadingLength > 0) {
+          textToSendToLLM = originalText.substring(leadingLength);
+          logMessage(`Detected leading formatting to preserve: "${leadingFormatText}"`);
+          logMessage(`Text sent to LLM: "${textToSendToLLM.substring(0, 50)}..."`);
+      } else {
+          logMessage(`No distinct leading formatting detected.`);
+          leadingFormat = null; // Ensure it's null if none found
+          leadingFormatText = null; // Explicitly nullify if none found
+      }
+      // ---- End Revised Leading Formatting Check ----
+
+      // ---- Link Detection and Handling (using getHyperlinkRanges) ----
+      let linkToPreserve = null;
+      if (hyperlinkRanges.items && hyperlinkRanges.items.length > 0) {
+        const firstLinkRange = hyperlinkRanges.items[0];
+        const linkText = firstLinkRange.text;
+        const linkAddress = firstLinkRange.hyperlink;
+
+        if (linkText && linkText.trim() && linkAddress) {
+            linkToPreserve = { text: linkText, address: linkAddress };
+            logMessage(`Detected hyperlink via getHyperlinkRanges: Text='${linkToPreserve.text}', Address='${linkToPreserve.address}'`);
+            prompt += `\\n\\nImportant: This paragraph contains a hyperlink with the exact text "${linkToPreserve.text}". Do NOT change the words within this specific phrase.`;
         }
       }
-    });
-  } catch (error) {
-    logMessage(`Error in onReimagine: ${error.toString()}`);
-  }
+      // ---- End Link Detection ----
+
+      try {
+        // **** Combine prompt with the potentially shortened textToSendToLLM ****
+        const combinedPrompt = `${prompt}\\n\\nParagraph to rewrite:\\n${textToSendToLLM}`;
+
+        let newText = null;
+        let ollamaResult = null;
+        let retries = 0;
+        const maxRetries = 3; // Max retries for link text preservation
+
+        while (retries <= maxRetries) {
+          logMessage(`Calling Ollama for paragraph ${idx + 1}, attempt ${retries + 1}...`);
+          ollamaResult = await callOllama(combinedPrompt); 
+
+          if (ollamaResult.error) {
+            throw new Error(`Ollama call failed on attempt ${retries}: ${ollamaResult.error}`);
+          }
+
+          newText = ollamaResult.response;
+
+          if (linkToPreserve && newText && !newText.includes(linkToPreserve.text)) {
+            retries++;
+            if (retries > maxRetries) {
+              logMessage(`Warning: LLM failed to preserve link text "${linkToPreserve.text}" after ${maxRetries} retries for paragraph ${idx + 1}. Reverting to original text PART for LLM.`);
+              newText = textToSendToLLM; // Revert only the LLM part to its original
+              // Need to signal that original text was used for this part
+              paragraphCache[idx].revertedLLMPart = true; 
+              break; 
+            } else {
+              logMessage(`Warning: Link text "${linkToPreserve.text}" not found in LLM response for paragraph ${idx + 1}. Retrying (${retries}/${maxRetries})...`);
+              await new Promise(resolve => setTimeout(resolve, 500 * retries)); 
+            }
+          } else {
+             if (linkToPreserve && newText && newText.includes(linkToPreserve.text)){
+                logMessage(`Link text "${linkToPreserve.text}" preserved successfully on attempt ${retries + 1}.`);
+             }
+             paragraphCache[idx].revertedLLMPart = false; // Mark as not reverted
+            break; 
+          }
+        } // End retry while loop
+
+        let finalLLMText = newText; // Holds the result for the part sent to LLM
+
+        // Fallback check if newText is still invalid
+        if (!finalLLMText || finalLLMText.trim().length === 0) {
+           if (ollamaResult && ollamaResult.rawData && ollamaResult.rawData.response) {
+              finalLLMText = ollamaResult.rawData.response;
+              logMessage("Used response from rawData as fallback.");
+              if (linkToPreserve && !finalLLMText.includes(linkToPreserve.text)) {
+                 logMessage(`Warning: Link text "${linkToPreserve.text}" still not found after rawData fallback. Reverting LLM part to original.`);
+                 finalLLMText = textToSendToLLM; 
+                 paragraphCache[idx].revertedLLMPart = true; 
+              }
+           } else {
+               logMessage(`Warning: Empty response from LLM for paragraph ${idx + 1} after checks/retries. Reverting LLM part to original.`);
+               finalLLMText = textToSendToLLM; 
+               paragraphCache[idx].revertedLLMPart = true; 
+           }
+        }
+
+        // --- Word count check adjustments ---
+        const originalFullWordCount = countWords(originalText); // Use full original for comparison baseline
+        const currentLLMWordCount = countWords(finalLLMText); 
+        const combinedWordCount = countWords(leadingFormatText || "") + currentLLMWordCount;
+        const wordCountThreshold = 1.1; // Allow 10% increase
+
+        // Only perform word count check if the LLM part wasn't reverted
+        if (!paragraphCache[idx].revertedLLMPart && 
+            combinedWordCount > originalFullWordCount * wordCountThreshold) {
+           logMessage(`Combined word count exceeded for paragraph ${idx + 1}. Original: ${originalFullWordCount}, Combined (Leading+LLM): ${combinedWordCount}. Requesting shorter version...`);
+           
+           const followUpBasePrompt = `${prompt}\\n\\nYou failed to do as instructed and exceeded the word count. Try again and make the text shorter. The original paragraph had ${originalFullWordCount} words, your combined response implies ${combinedWordCount} words. Only provide the rewritten text for the section you were asked to process.`;
+           let combinedFollowUpPrompt = `${followUpBasePrompt}\\n\\nRewrite this text specifically to be shorter:\\n${finalLLMText}`; // Send only the LLM's output for shortening
+            if (linkToPreserve) {
+                combinedFollowUpPrompt += `\\n\\nRemember: Keep the exact phrase "${linkToPreserve.text}" unchanged.`;
+            }
+
+           const shorterOllamaResult = await callOllama(combinedFollowUpPrompt);
+
+           if (shorterOllamaResult.error) {
+              logMessage(`Warning: Follow-up Ollama call failed: ${shorterOllamaResult.error}. Using previous (long) LLM text part.`);
+           } else {
+               const shorterText = shorterOllamaResult.response;
+               if (shorterText && shorterText.trim().length > 0) {
+                   // Check link preservation AGAIN for the shorter text
+                   if (linkToPreserve && !shorterText.includes(linkToPreserve.text)) {
+                       logMessage(`Warning: Link text "${linkToPreserve.text}" lost during shortening. Using previous (long) LLM text part.`);
+                   } else {
+                       logMessage(`Successfully shortened LLM text part for paragraph ${idx + 1}. New word count (LLM part): ${countWords(shorterText)}`);
+                       finalLLMText = shorterText; // Use the shorter version for the LLM part
+                   }
+               } else {
+                  logMessage("Warning: Follow-up call provided empty response. Using previous (long) LLM text part.");
+               }
+           }
+        }
+
+        // --- Revised Calculate Formatting Matches --- 
+        let formattingMatches = [];
+        if (finalLLMText !== textToSendToLLM) { // Only calculate if LLM changed its part
+           logMessage(`Calculating formatting matches within LLM response part...`);
+           let searchStartPos = 0; // Track position within originalText to correlate clauses
+           for (let i = 0; i < initialClauses.length; i++) {
+               const clause = initialClauses[i];
+               const clausePos = originalText.indexOf(clause.text, searchStartPos);
+
+               // Skip the clause(s) IF they constituted the leading format text
+               if (leadingLength > 0 && clausePos !== -1 && clausePos < leadingLength) {
+                   logMessage(`Skipping clause ("${clause.text}") because it's within the leading format block.`);
+                   searchStartPos = clausePos + clause.text.length; // Update search position
+                   continue; 
+               }
+               searchStartPos = clausePos + clause.text.length; // Update search pos for next iteration
+               
+               // Check direct match in LLM output
+               if (clause.text && finalLLMText.includes(clause.text)) { 
+                   formattingMatches.push({ newText: clause.text, format: clause.formatting });
+                   logMessage(`Found direct match for "${clause.text}" in LLM output.`);
+               } else { // Attempt LLM clause match only if direct match fails
+                   logMessage(`Direct match for "${clause.text}" not found. Attempting LLM clause match...`);
+                   try {
+                       const matchPrompt = createClauseMatchPrompt(originalText, finalLLMText, clause.text);
+                       const matchingClauseResult = await callOllama(matchPrompt); 
+                       let matchingClauseText;
+                       
+                       if (matchingClauseResult.error) { /* log warning */ logMessage(`Warning: Clause match Ollama call failed: ${matchingClauseResult.error}. Skipping format for "${clause.text}".`); } 
+                       else {
+                           matchingClauseText = matchingClauseResult.response?.trim();
+                           if (!matchingClauseText || matchingClauseText.length === 0 || matchingClauseText.toLowerCase().includes("not found") || matchingClauseText.toLowerCase().includes("no match")) { 
+                              /* log warning */ logMessage(`Warning: LLM returned empty or no clause match for "${clause.text}". Skipping.`); 
+                           } else {
+                               // **** VALIDATION STEP ****
+                               if (finalLLMText.includes(matchingClauseText)) {
+                                   logMessage(`LLM identified matching clause: "${matchingClauseText}" AND validated it exists in response.`);
+                                   formattingMatches.push({ 
+                                       newText: matchingClauseText, 
+                                       format: clause.formatting 
+                                   });
+                               } else {
+                                   logMessage(`LLM identified clause "${matchingClauseText}", but it was NOT FOUND in the final LLM text ("${finalLLMText.substring(0,50)}..."). Discarding match.`);
+                               }
+                           }
+                       }
+                   } catch (matchError) { /* log error */ logMessage(`Error during LLM clause matching for "${clause.text}": ${matchError}. Skipping.`); }
+               }
+           }
+           logMessage(`Found ${formattingMatches.length} validated formatting matches within LLM output.`);
+        } else { logMessage(`Skipping formatting match calculation for paragraph ${idx+1} as original LLM part was used.`); }
+        // --- End Revised Calculate Formatting Matches --- 
+
+        // --- Store final results in cache --- 
+        const combinedFinalText = (leadingFormatText || "") + finalLLMText;
+        paragraphCache[idx].reimagined = {
+          text: combinedFinalText,
+          formattingMatches: formattingMatches, 
+          link: (linkToPreserve && combinedFinalText.includes(linkToPreserve.text)) ? linkToPreserve : null,
+          leadingFormatText: leadingFormatText,
+          leadingFormat: leadingFormat,
+          revertedLLMPart: paragraphCache[idx].revertedLLMPart // Carry over revert status
+        };
+        
+        processedCount++;
+        logMessage(`Successfully processed paragraph ${idx + 1}.`);
+
+      } catch (error) {
+        logMessage(`LLM processing error loop for paragraph ${idx + 1}: ${error.message}`);
+        console.error(error);
+        paragraphCache[idx].reimagined = { 
+            text: originalText, 
+            error: error.message, 
+            link: linkToPreserve, 
+            formattingMatches: [],
+            leadingFormatText: null, 
+            leadingFormat: null,
+            revertedLLMPart: true // Mark as reverted on error
+        }; 
+        errorCount++;
+      }
+    } // End loop
+    logMessage(`Reimagination complete: ${processedCount} processed, ${errorCount} errors.`);
+    updateSelectedParagraphList(); 
+    updateUIForSelectedParagraph(); 
+  }).catch((error) => {
+    logMessage(`Error in Word.run for onReimagine: ${error}`);
+    console.error("Word.run Reimagination Error:", error);
+    if (error instanceof OfficeExtension.Error) {
+        logMessage("OfficeExtension Error Debug Info: " + JSON.stringify(error.debugInfo));
+    }
+  });
 }
 
 /**
  * Helper function to count words in a string
  */
-function countWords(text) {
-  return text.trim().split(/\s+/).filter(word => word.length > 0).length;
+function countWords(str) {
+  if (!str) return 0;
+  // Basic word count, splits on spaces and filters empty strings
+  return str.trim().split(/\s+/).filter(Boolean).length;
 }
 
 /**
@@ -721,24 +867,11 @@ function createClauseMatchPrompt(originalText, newText, originalClause) {
   const originalSentences = splitIntoSentences(originalText);
   const newSentences = splitIntoSentences(newText);
   
-  // Find which sentence contains the formatted phrase
-  let containingSentence = "";
-  let sentenceIndex = -1;
-  for (let i = 0; i < originalSentences.length; i++) {
-    if (originalSentences[i].includes(originalClause)) {
-      containingSentence = originalSentences[i];
-      sentenceIndex = i;
-      break;
-    }
-  }
-  
-  // If not found, use the whole text
-  if (sentenceIndex === -1) {
-    containingSentence = originalText;
-  }
-  
+  // Find the sentence containing the clause
+  let containingSentence = originalSentences.find(s => s.includes(originalClause)) || originalText;
+
   // Calculate relative position in original text
-  const relativePosition = sentenceIndex / originalSentences.length;
+  const relativePosition = originalSentences.indexOf(containingSentence) / originalSentences.length;
   
   // Select relevant sentences from new text
   let relevantNewSentences;
@@ -771,7 +904,7 @@ function createClauseMatchPrompt(originalText, newText, originalClause) {
   return `FIND THE EXACT MATCHING PHRASE ONLY.
 
 The original text contained this formatted phrase: "${originalClause}"
-It appeared in this sentence: "${containingSentence}"
+It appeared in this source text: "${containingSentence}" 
 
 In the new text, find the equivalent phrase that matches in meaning and importance.
 Relevant portion of new text: "${relevantNewText}"
@@ -858,8 +991,13 @@ async function onApply() {
     return;
   }
   
-  if (!paragraphCache[currentParagraphIndex].reimagined?.text) {
-    logMessage(`No modified text for paragraph ${currentParagraphIndex + 1}`);
+  const cacheEntry = paragraphCache[currentParagraphIndex];
+  const reimaginedText = cacheEntry.reimagined?.text;
+  const leadingFormatText = cacheEntry.reimagined?.leadingFormatText;
+  const leadingFormat = cacheEntry.reimagined?.leadingFormat;
+  
+  if (!reimaginedText) {
+    logMessage(`No modified/reimagined text available for paragraph ${currentParagraphIndex + 1}`);
     return;
   }
   
@@ -867,48 +1005,135 @@ async function onApply() {
   
   await Word.run(async (context) => {
     try {
-      // Get all paragraphs
-      const body = context.document.body;
-      const paras = body.paragraphs;
-      paras.load("items");
-      await context.sync();
-      
-      if (currentParagraphIndex >= paras.items.length) {
-        logMessage(`Error: Paragraph index ${currentParagraphIndex} out of bounds`);
-        return;
+      // Get the specific paragraph using its document index if available, otherwise use currentParagraphIndex
+      const docIndex = cacheEntry.documentIndex ?? currentParagraphIndex; // Prefer docIndex if cached
+       const paras = context.document.body.paragraphs;
+       paras.load("items");
+       await context.sync();
+
+      if (docIndex >= paras.items.length) {
+         // This might happen if the document changed significantly since refresh
+         logMessage(`Error: Paragraph document index ${docIndex} is out of bounds (total: ${paras.items.length}). Cannot apply.`);
+         // Optionally try falling back to currentParagraphIndex if different? For now, just error out.
+         return; 
       }
-      
-      // Get the paragraph and reimagined text
-      const paragraph = paras.items[currentParagraphIndex];
-      const reimaginedText = paragraphCache[currentParagraphIndex].reimagined.text;
+
+      const paragraph = paras.items[docIndex];
       
       // Replace the text
       paragraph.insertText(reimaginedText, "Replace");
       await context.sync();
-      
-      // Apply formatting if available
-      if (paragraphCache[currentParagraphIndex].reimagined.formattingMatches?.length > 0) {
-        await applyFormatting(context, paragraph, paragraphCache[currentParagraphIndex].reimagined.formattingMatches);
+      logMessage("Paragraph text replaced.");
+
+       // --- Reapply Leading Formatting if necessary --- 
+      if (leadingFormatText && leadingFormat) {
+          logMessage(`Attempting to reapply leading format for "${leadingFormatText}"`);
+          const searchResults = paragraph.search(leadingFormatText, { matchCase: true }); 
+          searchResults.load("items");
+          const paragraphRange = paragraph.getRange("Start"); 
+          paragraphRange.load("start");
+          await context.sync();
+
+          if (searchResults.items.length > 0) {
+              const leadingRange = searchResults.items[0];
+              leadingRange.load("start"); 
+              await context.sync();
+
+              if (leadingRange.start === paragraphRange.start) {
+                  logMessage("Found leading text at paragraph start. Applying format...");
+                  // **** Apply underline ****
+                  if (leadingFormat.bold !== null) leadingRange.font.bold = leadingFormat.bold;
+                  if (leadingFormat.italic !== null) leadingRange.font.italic = leadingFormat.italic;
+                  if (leadingFormat.size !== null) leadingRange.font.size = leadingFormat.size;
+                  if (leadingFormat.underline !== null) leadingRange.font.underline = leadingFormat.underline; // Add underline
+                  await context.sync();
+                  logMessage("Leading formatting reapplied.");
+
+                  // --- Explicitly apply modal formatting to the rest --- 
+                  try {
+                    const defaultFont = paragraphFormatting[currentParagraphIndex]?.defaultFont;
+                    if (defaultFont) {
+                        logMessage(`Applying modal format ${JSON.stringify(defaultFont)} to rest of paragraph.`);
+                        const restRange = leadingRange.getRange("After").expandTo(paragraph.getRange("End"));
+                        restRange.load("text"); 
+                        await context.sync();
+                        logMessage(`Applying modal to range: "${restRange.text.substring(0,50)}..."`);
+
+                        // **** Reset underline ****
+                        if (defaultFont.bold !== null) restRange.font.bold = defaultFont.bold;
+                        if (defaultFont.italic !== null) restRange.font.italic = defaultFont.italic;
+                        if (defaultFont.size !== null) restRange.font.size = defaultFont.size;
+                        if (defaultFont.underline !== null) restRange.font.underline = defaultFont.underline; // Add underline reset
+                        await context.sync();
+                        logMessage("Modal formatting applied to rest of paragraph.");
+                    } else {
+                        logMessage("Warning: Could not find default/modal font info to apply to rest of paragraph.");
+                    }
+                  } catch (resetError) {
+                     logMessage(`Error applying modal format to rest of paragraph: ${resetError}`);
+                  }
+                  // --- End applying modal format --- 
+
+              } else {
+                   logMessage(`Warning: Found "${leadingFormatText}" but not at the exact start of the paragraph. Cannot reapply leading format.`);
+              }
+          } else {
+              logMessage(`Warning: Could not find leading text "${leadingFormatText}" after insertion to reapply formatting.`);
+          }
+      }
+      // --- End Reapply Leading Formatting ---
+
+      // --- Reapply Link if necessary --- 
+      const linkInfo = cacheEntry.reimagined?.link;
+      if (linkInfo && linkInfo.text && linkInfo.address) {
+          logMessage(`Attempting to reapply link for "${linkInfo.text}"`);
+          const linkSearchResults = paragraph.search(linkInfo.text, { matchCase: true }); 
+          linkSearchResults.load("items");
+          await context.sync();
+
+          if (linkSearchResults.items.length > 0) {
+              const linkRange = linkSearchResults.items[0];
+              linkRange.hyperlink = linkInfo.address;
+              await context.sync();
+              logMessage(`Successfully reapplied hyperlink to "${linkInfo.text}".`);
+          } else {
+              logMessage(`Warning: Could not find the exact text "${linkInfo.text}" in paragraph ${currentParagraphIndex + 1} after insertion to reapply the link.`);
+          }
+      }
+      // ---- End Link Reapplication ----
+
+      // --- Apply other formatting --- 
+      // TODO: Review applyFormatting logic - does it handle the potentially modified text correctly?
+      // Only apply if the LLM part wasn't reverted?
+      if (cacheEntry.reimagined?.formattingMatches?.length > 0 && !cacheEntry.reimagined?.revertedLLMPart) {
+        logMessage("Applying other formatting matches...");
+        await applyFormatting(context, paragraph, cacheEntry.reimagined.formattingMatches);
+      } else if (cacheEntry.reimagined?.revertedLLMPart) {
+         logMessage("Skipping other formatting application as original LLM part was used.");
       }
       
-      // Update source cache with the new text
+      // --- Update Cache and UI --- 
       paragraphCache[currentParagraphIndex].source = reimaginedText;
-      
-      // Clear reimagined content and state
-      paragraphCache[currentParagraphIndex].reimagined = null;
+      paragraphCache[currentParagraphIndex].reimagined = null; 
       paragraphCache[currentParagraphIndex].reimagineState = false;
       selectedParagraphs.delete(currentParagraphIndex);
-      
+      document.getElementById("modifiedText").value = "";
+      document.getElementById("checkboxReimagine").checked = false;
       logMessage(`Successfully applied changes to paragraph ${currentParagraphIndex + 1}`);
-      
-      // Update UI
-      updateUIForSelectedParagraph();
-      updateSelectedParagraphList();
+      updateUIForSelectedParagraph(); 
+      updateSelectedParagraphList(); 
       
     } catch (error) {
-      logMessage(`Error in onApply: ${error}`);
+      logMessage(`Error in onApply for paragraph ${currentParagraphIndex + 1}: ${error.message}`);
+       if (error instanceof OfficeExtension.Error) {
+          logMessage("OfficeExtension Error Debug Info: " + JSON.stringify(error.debugInfo));
+       }
+       console.error("onApply Error:", error);
     }
-  }).catch((error) => logMessage(`Error in Word.run: ${error}`));
+  }).catch((error) => {
+      logMessage(`Error in Word.run for onApply: ${error}`);
+      console.error("Word.run onApply Error:", error);
+  });
 }
 
 /**
@@ -919,59 +1144,193 @@ async function onApplyAll() {
     logMessage("No paragraphs available to apply changes.");
     return;
   }
+  if (selectedParagraphs.size === 0) {
+     logMessage("No paragraphs selected to apply changes.");
+     return;
+  }
+
+  logMessage(`Starting Apply All for ${selectedParagraphs.size} paragraphs...`);
   
+  // Store selected paragraphs in array since we'll be clearing the set during the process
+  const selectedParaArray = Array.from(selectedParagraphs);
+  let appliedCount = 0;
+  let skippedCount = 0;
+
   await Word.run(async (context) => {
     const body = context.document.body;
     const paras = body.paragraphs;
-    paras.load("items");
+    // Load items once for efficiency if possible, though indices might shift if paragraphs are added/deleted
+    // Consider loading within loop if document structure changes are likely during apply all
+    paras.load("items"); 
     await context.sync();
-    
-    let appliedCount = 0;
-    let skippedCount = 0;
-    
-    for (let idx of selectedParagraphs) {
-      if (paragraphCache[idx].reimagined?.text && idx < paras.items.length) {
+    const totalDocParas = paras.items.length;
+
+    for (let idx of selectedParaArray) {
+        // Check cache validity
+        if (idx < 0 || idx >= paragraphCache.length) {
+             logMessage(`Skipping invalid cache index ${idx} during Apply All.`);
+             skippedCount++;
+             selectedParagraphs.delete(idx); // Clean up selection
+             continue;
+        }
+
+        const cacheEntry = paragraphCache[idx];
+        const reimaginedText = cacheEntry.reimagined?.text;
+        const leadingFormatText = cacheEntry.reimagined?.leadingFormatText;
+        const leadingFormat = cacheEntry.reimagined?.leadingFormat;
+
+        if (!reimaginedText) {
+            logMessage(`Skipping paragraph ${idx + 1}: No reimagined text found.`);
+            skippedCount++;
+            // Clear state even if skipped
+             cacheEntry.reimagined = null;
+             cacheEntry.reimagineState = false;
+             selectedParagraphs.delete(idx);
+            continue;
+        }
+
         try {
-          const paragraph = paras.items[idx];
-          const reimaginedText = paragraphCache[idx].reimagined.text;
-          
+          // Get the specific paragraph using its document index if available
+           const docIndex = cacheEntry.documentIndex ?? idx; 
+           if (docIndex >= totalDocParas) {
+              logMessage(`Error: Paragraph document index ${docIndex} (for cache index ${idx}) is out of bounds (total: ${totalDocParas}). Cannot apply.`);
+              skippedCount++;
+               // Clear state
+               cacheEntry.reimagined = null;
+               cacheEntry.reimagineState = false;
+               selectedParagraphs.delete(idx);
+              continue; 
+           }
+           const paragraph = paras.items[docIndex];
+
           // Replace the text
           paragraph.insertText(reimaginedText, "Replace");
-          await context.sync();
-          
-          // Apply formatting
-          if (paragraphCache[idx].reimagined.formattingMatches?.length > 0) {
-            await applyFormatting(context, paragraph, paragraphCache[idx].reimagined.formattingMatches);
+          // Syncing inside the loop can be slow but ensures each step completes
+          await context.sync(); 
+
+          // --- Reapply Leading Formatting --- 
+          if (leadingFormatText && leadingFormat) {
+              logMessage(`ApplyAll: Reapplying leading format for para ${idx + 1}`);
+              const searchResults = paragraph.search(leadingFormatText, { matchCase: true }); 
+              searchResults.load("items");
+              const paragraphRange = paragraph.getRange("Start"); 
+              paragraphRange.load("start");
+              await context.sync();
+              if (searchResults.items.length > 0) {
+                  const leadingRange = searchResults.items[0];
+                  leadingRange.load("start"); 
+                  await context.sync();
+                  if (leadingRange.start === paragraphRange.start) {
+                      if (leadingFormat.bold !== null) leadingRange.font.bold = leadingFormat.bold;
+                      if (leadingFormat.italic !== null) leadingRange.font.italic = leadingFormat.italic;
+                      if (leadingFormat.size !== null) leadingRange.font.size = leadingFormat.size;
+                      if (leadingFormat.underline !== null) leadingRange.font.underline = leadingFormat.underline; // Add underline
+                      await context.sync();
+                      logMessage(`ApplyAll: Leading format reapplied for para ${idx + 1}.`);
+
+                      // --- Explicitly apply modal formatting to the rest --- 
+                      try {
+                        const defaultFont = paragraphFormatting[idx]?.defaultFont;
+                        if (defaultFont) {
+                            logMessage(`ApplyAll: Applying modal format ${JSON.stringify(defaultFont)} to rest of para ${idx + 1}.`);
+                            const restRange = leadingRange.getRange("After").expandTo(paragraph.getRange("End"));
+                            restRange.load("text");
+                            await context.sync();
+                            logMessage(`ApplyAll: Applying modal to range: "${restRange.text.substring(0,50)}..."`);
+                            
+                            // **** Reset underline ****
+                            if (defaultFont.bold !== null) restRange.font.bold = defaultFont.bold;
+                            if (defaultFont.italic !== null) restRange.font.italic = defaultFont.italic;
+                            if (defaultFont.size !== null) restRange.font.size = defaultFont.size;
+                            if (defaultFont.underline !== null) restRange.font.underline = defaultFont.underline; // Add underline reset
+                            await context.sync();
+                            logMessage(`ApplyAll: Modal formatting applied to rest of para ${idx + 1}.`);
+                        } else {
+                           logMessage(`ApplyAll Warning: Could not find default font info for para ${idx + 1}.`);
+                        }
+                      } catch (resetError) {
+                         logMessage(`ApplyAll Error applying modal format to rest of para ${idx + 1}: ${resetError}`);
+                      }
+                      // --- End applying modal format --- 
+
+                  } else { logMessage(`ApplyAll Warning: Found leading text for para ${idx + 1} but not at start.`); }
+              } else { logMessage(`ApplyAll Warning: Could not find leading text for para ${idx + 1}.`); }
           }
-          
-          // Update source cache with the new text
-          paragraphCache[idx].source = reimaginedText;
-          
-          // Clear reimagined content and state
-          paragraphCache[idx].reimagined = null;
-          paragraphCache[idx].reimagineState = false;
-          
+          // --- End Reapply Leading Formatting ---
+
+          // --- Reapply Link --- 
+          const linkInfo = cacheEntry.reimagined?.link;
+          if (linkInfo && linkInfo.text && linkInfo.address) {
+             logMessage(`ApplyAll: Reapplying link for para ${idx + 1}`);
+              const linkSearchResults = paragraph.search(linkInfo.text, { matchCase: true }); 
+              linkSearchResults.load("items");
+              await context.sync();
+              if (linkSearchResults.items.length > 0) {
+                  const linkRange = linkSearchResults.items[0];
+                  linkRange.hyperlink = linkInfo.address;
+                  await context.sync();
+                  logMessage(`ApplyAll: Link reapplied for para ${idx + 1}.`);
+              } else { logMessage(`ApplyAll Warning: Could not find link text for para ${idx + 1}.`); }
+          }
+          // --- End Link Reapplication ---
+
+          // --- Apply other formatting --- 
+           if (cacheEntry.reimagined?.formattingMatches?.length > 0 && !cacheEntry.reimagined?.revertedLLMPart) {
+              logMessage(`ApplyAll: Applying other formatting matches for paragraph ${idx + 1}...`);
+              await applyFormatting(context, paragraph, cacheEntry.reimagined.formattingMatches);
+              await context.sync(); // Sync after formatting
+           } else if (cacheEntry.reimagined?.revertedLLMPart) {
+              logMessage(`ApplyAll: Skipping other formatting for paragraph ${idx + 1} as original LLM part was used.`);
+           }
+           
+          // --- Update Cache and State --- 
+          cacheEntry.source = reimaginedText;
+          cacheEntry.reimagined = null;
+          cacheEntry.reimagineState = false;
+          selectedParagraphs.delete(idx); 
           logMessage(`Applied changes to paragraph ${idx + 1}`);
           appliedCount++;
+
         } catch (error) {
-          logMessage(`Error processing paragraph ${idx + 1}: ${error}`);
+          logMessage(`Error processing paragraph ${idx + 1} during Apply All: ${error.message}`);
+          if (error instanceof OfficeExtension.Error) {
+             logMessage("OfficeExtension Error Debug Info: " + JSON.stringify(error.debugInfo));
+          }
+           console.error(`Apply All Error - Para ${idx + 1}:`, error);
           skippedCount++;
+           // Attempt to clear state even on error
+           cacheEntry.reimagined = null; 
+           cacheEntry.reimagineState = false;
+           selectedParagraphs.delete(idx);
         }
-      } else {
-        logMessage(`No modified text for paragraph ${idx + 1}`);
-        skippedCount++;
-      }
-    }
+    } // End loop
     
+    // Final sync after loop (though syncs happened inside)
     await context.sync();
-    logMessage(`Apply All completed: ${appliedCount} paragraphs updated, ${skippedCount} skipped`);
+    logMessage(`Apply All completed: ${appliedCount} paragraphs updated, ${skippedCount} skipped/errors.`);
     
-    // Clear all selections since we've applied everything
+    // Clear all selections (should be empty now, but belt-and-suspenders)
     selectedParagraphs.clear();
-    updateSelectedParagraphList();
-    updateUIForSelectedParagraph();
     
-  }).catch((error) => logMessage("Error in onApplyAll: " + error));
+    // Explicitly clear UI elements for the *current* paragraph if it was processed
+    document.getElementById("modifiedText").value = "";
+    document.getElementById("checkboxReimagine").checked = false;
+    
+    // Update UI
+    updateSelectedParagraphList(); // Show empty list
+    updateUIForSelectedParagraph(); // Update display for current index
+    
+  }).catch((error) => {
+      logMessage("Error in Word.run for onApplyAll: " + error);
+       if (error instanceof OfficeExtension.Error) {
+          logMessage("OfficeExtension Error Debug Info: " + JSON.stringify(error.debugInfo));
+       }
+       console.error("Word.run onApplyAll Error:", error);
+      // Attempt to clear UI state even on top-level error
+      selectedParagraphs.clear();
+      updateSelectedParagraphList();
+      updateUIForSelectedParagraph();
+  });
 }
 
 /**
@@ -1153,12 +1512,13 @@ async function applyFormatting(context, paragraph, formattingMatches) {
           const range = ranges.items[0];
           
           // Apply formatting
-          if (match.formatting.bold !== null) range.font.bold = match.formatting.bold;
-          if (match.formatting.italic !== null) range.font.italic = match.formatting.italic;
-          if (match.formatting.size !== null) range.font.size = match.formatting.size;
+          if (match.format.bold !== null) range.font.bold = match.format.bold;
+          if (match.format.italic !== null) range.font.italic = match.format.italic;
+          if (match.format.size !== null) range.font.size = match.format.size;
+          if (match.format.underline !== null) range.font.underline = match.format.underline; // Add underline
           
           await context.sync();
-          logMessage(`Applied formatting to: "${searchText}"`);
+          logMessage(`Applied formatting to: "${range.text.substring(0, 50)}..."`); // Log applied range text
         } else {
           // Try searching for chunks if the text is too long
           const chunks = getSearchableChunks(match.newText);
@@ -1175,9 +1535,10 @@ async function applyFormatting(context, paragraph, formattingMatches) {
               const range = chunkRanges.items[0];
               
               // Apply formatting
-              if (match.formatting.bold !== null) range.font.bold = match.formatting.bold;
-              if (match.formatting.italic !== null) range.font.italic = match.formatting.italic;
-              if (match.formatting.size !== null) range.font.size = match.formatting.size;
+              if (match.format.bold !== null) range.font.bold = match.format.bold;
+              if (match.format.italic !== null) range.font.italic = match.format.italic;
+              if (match.format.size !== null) range.font.size = match.format.size;
+              if (match.format.underline !== null) range.font.underline = match.format.underline; // Add underline
               
               await context.sync();
               logMessage(`Applied formatting to chunk: "${chunk}"`);
@@ -1191,8 +1552,7 @@ async function applyFormatting(context, paragraph, formattingMatches) {
           }
         }
       } catch (matchError) {
-        logMessage(`Error processing format match: ${matchError}`);
-        // Continue with next match
+        logMessage(`Error processing format match for "${match.newText}": ${matchError}`);
       }
     }
   } catch (error) {
