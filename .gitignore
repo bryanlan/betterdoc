@@ -1,2 +1,40 @@
-localhost.pfx
-/node_modules/
+# Confidential configuration files
+confidential.py
+
+# Azure token cache files
+azure_token_cache.json
+ollama-service/azure_token_cache.json
+
+# Temporary files
+ollama-service/get_config.py
+
+# Node modules
+node_modules/
+ollama-service/node_modules/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# MSAL cache
+.msal_cache/
+
+# Environment files
+.env
+.env.local
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*

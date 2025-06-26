@@ -1394,7 +1394,7 @@ function onModelSelectChange() {
 }
 
 /**
- * Calls our local LLM-like service with a paragraph and prompt.
+ * Calls our local server which routes to either Azure AI Foundry or Ollama based on model selection.
  */
 async function callOllama(prompt, maxRetries = 3) {
   const selectedModel = document.getElementById("modelSelect").value;
@@ -1402,16 +1402,17 @@ async function callOllama(prompt, maxRetries = 3) {
     logMessage("Error: No model selected.");
     return { error: "No model selected" };
   }
-  const url = `http://localhost:11434/api/generate`; // Ensure this matches your Ollama endpoint
+  
+  const url = `https://localhost:8000/ollama`; // Call our routing server
 
   const body = JSON.stringify({
     model: selectedModel,
-    prompt: prompt,
-    stream: false, // Ensure response is not streamed for easier handling
+    userPrompt: prompt,  // The prompt already contains the full request
+    paragraphText: ""    // Leave empty since prompt is already combined
   });
 
   // Log the full prompt being sent
-  logMessage(`Sending request to Ollama (${selectedModel}). Full Prompt: ${prompt}`);
+  logMessage(`Sending request to multi-model server (${selectedModel}). Prompt length: ${prompt.length} chars`);
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
@@ -1429,20 +1430,19 @@ async function callOllama(prompt, maxRetries = 3) {
 
       // Get raw text first
       const rawResponseText = await response.text();
-      logMessage(`Raw server response received: ${rawResponseText}`); // Log the raw response
+      logMessage(`Raw server response received: ${rawResponseText}`);
 
-      // Now parse the raw text
+      // Parse the response
       const data = JSON.parse(rawResponseText); 
       
-      if (!data || !data.response) {
-        logMessage(`Warning: Ollama response missing 'response' field. Full data: ${JSON.stringify(data)}`);
-        // Depending on expected behavior, you might return null or throw an error
-        // For now, let's return the structure indicating an issue but not crash
-        return { response: null, error: "Invalid response structure from Ollama", rawData: data }; 
+      if (!data || !data.result) {
+        logMessage(`Warning: Server response missing 'result' field. Full data: ${JSON.stringify(data)}`);
+        return { response: null, error: "Invalid response structure from server", rawData: data }; 
       }
       
       logMessage("Server response parsed successfully.");
-      return data; // Return the parsed data
+      // Return in the format expected by existing code
+      return { response: data.result, rawData: data }; 
 
     } catch (error) {
       logMessage(`Attempt ${attempt} failed: ${error.message}`);
@@ -1455,7 +1455,7 @@ async function callOllama(prompt, maxRetries = 3) {
       await new Promise(resolve => setTimeout(resolve, delay));
     }
   }
-  // Should not be reached if maxRetries > 0, but added for safety
+  
   return { error: "Failed after multiple retries" }; 
 }
 

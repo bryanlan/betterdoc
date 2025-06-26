@@ -3,6 +3,7 @@
 *.exe
 *.dll
 *.def
+azure_token_cache.json
 
 # Certificates and security files
 *.crt
