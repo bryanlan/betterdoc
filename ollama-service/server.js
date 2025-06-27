@@ -381,9 +381,10 @@ app.post("/ollama", async (req, res) => {
 
 const PORT = 8000;
 
-// Set up paths to your development certificate and key.
-const certPath = path.join("C:", "Users", "blangl", ".office-addin-dev-certs", "localhost.crt");
-const keyPath = path.join("C:", "Users", "blangl", ".office-addin-dev-certs", "localhost.key");
+// Set up paths to your development certificate and key using the current user's home directory
+const userHome = process.env.USERPROFILE || process.env.HOME;
+const certPath = path.join(userHome, ".office-addin-dev-certs", "localhost.crt");
+const keyPath = path.join(userHome, ".office-addin-dev-certs", "localhost.key");
 
 const options = {
   cert: fs.readFileSync(certPath),
