@@ -210,7 +210,11 @@ loadCachedToken();
 
 // Function to check if model is Azure-based
 function isAzureModel(model) {
-  return model && (model.toLowerCase().includes('azure') || model === 'gpt-4.1');
+  return model && (
+    model.toLowerCase().includes('azure') || 
+    model === 'gpt-4.1' || 
+    model === 'gpt-4.1 (Azure)'
+  );
 }
 
 // Function to call Azure AI Foundry - Updated with working API structure
@@ -279,34 +283,71 @@ async function callAzureAI(userPrompt, paragraphText) {
   }
 }
 
+// Function to check if Ollama is available
+async function checkOllamaAvailable() {
+  try {
+    const response = await fetch('http://localhost:11434/api/version', {
+      method: 'GET',
+      timeout: 5000 // 5 second timeout
+    });
+    return response.ok;
+  } catch (error) {
+    return false;
+  }
+}
+
 // Function to call local Ollama
 async function callOllama(userPrompt, paragraphText, model) {
-  const response = await fetch('http://localhost:11434/api/generate', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: model,
-      prompt: userPrompt,
-      system: paragraphText,
-      stream: false
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Ollama API error: ${response.status} - ${response.statusText}`);
+  // Check if Ollama is available first
+  const ollamaAvailable = await checkOllamaAvailable();
+  
+  if (!ollamaAvailable) {
+    console.log(`⚠️ Ollama not available for model: ${model}`);
+    return "Sorry, you need to install and run Ollama to use local models. Please visit https://ollama.ai to download and install Ollama, then try again.";
   }
 
-  const data = await response.json();
-  console.log("Ollama server response:", data);
-  
-  if (data && data.response) {
-    return data.response.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-  } else if (data && data.result) {
-    return data.result;
-  } else {
-    throw new Error("Invalid response from Ollama");
+  try {
+    const response = await fetch('http://localhost:11434/api/generate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: model,
+        prompt: userPrompt,
+        system: paragraphText,
+        stream: false
+      }),
+    });
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        return `Sorry, the model "${model}" is not installed in Ollama. Please run "ollama pull ${model}" to install it, or choose a different model.`;
+      }
+      throw new Error(`Ollama API error: ${response.status} - ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    console.log("Ollama server response:", data);
+    
+    if (data && data.response) {
+      return data.response.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+    } else if (data && data.result) {
+      return data.result;
+    } else {
+      throw new Error("Invalid response from Ollama");
+    }
+  } catch (error) {
+    console.error(`Error calling Ollama for model ${model}:`, error.message);
+    
+    // Return user-friendly error messages
+    if (error.message.includes('ECONNREFUSED') || error.message.includes('fetch failed')) {
+      return "Sorry, Ollama is not running. Please start Ollama and try again.";
+    } else if (error.message.includes('timeout')) {
+      return "Sorry, Ollama is taking too long to respond. Please check if Ollama is running properly.";
+    } else {
+      return `Sorry, there was an error with the local model "${model}". Please try again or choose a different model.`;
+    }
   }
 }
 
@@ -352,8 +393,10 @@ const options = {
 https.createServer(options, app).listen(PORT, () => {
   console.log(`Multi-model server listening on https://localhost:${PORT}`);
   console.log("Supported models:");
-  console.log(`- Azure models (gpt-4.1, azure-*) -> Azure AI Foundry (${AZURE_API_BASE})`);
-  console.log("- Local models (gemma3, qwq, etc.) -> Ollama");
+  console.log(`- Azure model: "gpt-4.1 (Azure)" -> Azure AI Foundry (${AZURE_API_BASE})`);
+  console.log("- Local models: gemma3, qwq, deepseek-r1 -> Ollama (optional - install from https://ollama.ai)");
   console.log(`- Default model: ${AZURE_DEFAULT_MODEL}`);
   console.log(`- Token cache: ${TOKEN_CACHE_FILE}`);
+  console.log("\n✅ Azure models work without Ollama");
+  console.log("⚠️  Local models require Ollama to be installed and running");
 });
